@@ -2,7 +2,7 @@
 
 For each task T with N>=2 clean refs:
   for each ref q in T:
-      refs = T \ {q}
+      refs = T minus {q}
       compute (ivar, peak, cert) for q vs refs (cert-weighted)
   → 3 distributions of size N (sorted): F_T_ivar, F_T_peak, F_T_cert
   → optionally per-pixel sorted distribution (N, H, W) for per-pixel heatmap

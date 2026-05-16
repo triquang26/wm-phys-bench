@@ -34,4 +34,6 @@ class InteriorMask:
             fg_mask.astype(np.uint8),
             self._kernel,
             iterations=1,
+            borderType=cv2.BORDER_CONSTANT,
+            borderValue=0,
         ).astype(bool)
