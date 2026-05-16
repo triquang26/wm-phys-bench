@@ -5,10 +5,11 @@
 #
 # Or copy this file as a new YAML and edit there (one YAML per experiment).
 
-# Paths
-root_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe
-high_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/high
-low_dir:        /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/low
+# Paths — relative to feature_matching_eval_hallucination/ root
+# data/ is a .gitignored dir (symlinks or real dirs — see README)
+root_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination
+high_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high
+low_dir:        /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/low
 artifacts_dir:  /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
 
 # RoMaV2

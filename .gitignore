@@ -59,6 +59,10 @@ run.log
 # Misc legacy artifacts
 files.zip
 
+# Data directory — large datasets, never commit
+# Actual dirs live here or as symlinks pointing outside the repo
+data/
+
 # Allow specific small files we DO want tracked
 !warp_score/configs/*.yaml
 !tests/data/                         # small unit-test fixtures, if added later
