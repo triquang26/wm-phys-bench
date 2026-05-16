@@ -1,0 +1,110 @@
+"""WarpScoreConfig — single source of truth for hyperparameters.
+
+Load from YAML for experiments, or override on CLI.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+from typing import Literal, Optional
+
+
+@dataclass
+class WarpScoreConfig:
+    # ── Paths ──────────────────────────────────────────────────────────────
+    root_dir: Path = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe")
+    high_dir: Path = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/high")
+    low_dir: Path = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/low")
+    artifacts_dir: Path = Path(
+        "/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/"
+        "feature_matching_eval_hallucination/artifacts/v9_dreamgen"
+    )
+
+    # ── RoMaV2 ─────────────────────────────────────────────────────────────
+    setting: Literal["turbo", "fast", "base", "precise"] = "turbo"
+    use_precision: bool = True
+    bidirectional: bool = False
+    vis_size: int = 224
+    device: str = "cuda"
+
+    # ── Foreground / interior mask ─────────────────────────────────────────
+    erosion_k: int = 10
+
+    # ── Calibration ────────────────────────────────────────────────────────
+    per_pixel_calibration: bool = True
+    gpd_tail: bool = False
+    n_min_refs: int = 30
+    rng_seed: int = 42
+
+    # ── Signals + fusion ───────────────────────────────────────────────────
+    signal_names: tuple[str, ...] = ("ivar", "peak", "cert")
+    fuser: Literal["stouffer", "fisher", "max"] = "stouffer"
+    stouffer_weights: dict[str, float] = field(default_factory=lambda: {
+        "ivar": 2.0, "peak": 1.0, "cert": 1.0,
+    })
+
+    # ── Decision threshold ─────────────────────────────────────────────────
+    fpr_alpha: float = 0.05  # H_score > (1 - alpha) → label=1
+
+    # ── Visualization ──────────────────────────────────────────────────────
+    save_heatmaps: bool = True
+
+    # ── Derived (set in __post_init__) ─────────────────────────────────────
+    calib_path: Path = field(init=False)
+    summary_csv: Path = field(init=False)
+    run_log: Path = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.root_dir = Path(self.root_dir)
+        self.high_dir = Path(self.high_dir)
+        self.low_dir = Path(self.low_dir)
+        self.artifacts_dir = Path(self.artifacts_dir)
+        self.calib_path = self.artifacts_dir / "calibration.npz"
+        self.summary_csv = self.artifacts_dir / "summary.csv"
+        self.run_log = self.artifacts_dir / "run.log"
+
+    # ── Decision threshold helper ──────────────────────────────────────────
+    @property
+    def decision_threshold(self) -> float:
+        """H_score above this → labeled hallucination."""
+        return 1.0 - self.fpr_alpha
+
+    # ── Loaders ────────────────────────────────────────────────────────────
+    @classmethod
+    def from_yaml(cls, path: Path | str) -> "WarpScoreConfig":
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        return cls._from_dict(data)
+
+    @classmethod
+    def _from_dict(cls, data: dict) -> "WarpScoreConfig":
+        valid = {f.name for f in fields(cls) if f.init}
+        filtered = {k: v for k, v in data.items() if k in valid}
+        # Convert string paths to Path
+        for k in ("root_dir", "high_dir", "low_dir", "artifacts_dir"):
+            if k in filtered:
+                filtered[k] = Path(filtered[k])
+        # signal_names: list → tuple
+        if "signal_names" in filtered and isinstance(filtered["signal_names"], list):
+            filtered["signal_names"] = tuple(filtered["signal_names"])
+        return cls(**filtered)
+
+    def to_dict(self) -> dict:
+        out: dict = {}
+        for f in fields(self):
+            v = getattr(self, f.name)
+            if isinstance(v, Path):
+                v = str(v)
+            elif isinstance(v, tuple):
+                v = list(v)
+            out[f.name] = v
+        return out
+
+    def merge(self, **overrides) -> "WarpScoreConfig":
+        """Return a new config with the given attributes replaced."""
+        from dataclasses import replace
+        # Filter to init=True fields only
+        valid = {f.name for f in fields(self) if f.init}
+        kept = {k: v for k, v in overrides.items() if k in valid and v is not None}
+        return replace(self, **kept)

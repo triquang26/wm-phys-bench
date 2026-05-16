@@ -1,0 +1,42 @@
+# warp_score default config.
+#
+# Override paths/flags on CLI:
+#   python -m warp_score --config warp_score/configs/default.yaml --artifacts_dir ... calibrate
+#
+# Or copy this file as a new YAML and edit there (one YAML per experiment).
+
+# Paths
+root_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe
+high_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/high
+low_dir:        /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/low
+artifacts_dir:  /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+
+# RoMaV2
+setting:         turbo
+use_precision:   true
+bidirectional:   false
+vis_size:        224
+device:          cuda
+
+# Masks
+erosion_k:       10
+
+# Calibration
+per_pixel_calibration:   true   # store sorted per-pixel var maps (~10MB per task)
+gpd_tail:                false
+n_min_refs:              30
+rng_seed:                42
+
+# Signals + fusion
+signal_names:    [ivar, peak, cert]
+fuser:           stouffer
+stouffer_weights:
+  ivar: 2.0
+  peak: 1.0
+  cert: 1.0
+
+# Decision
+fpr_alpha:       0.05            # H_score > 1 - alpha → label=1
+
+# Visualization
+save_heatmaps:   true

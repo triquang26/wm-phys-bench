@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual envs
+.venv/
+.venv*/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ============================================================================
+# Project-specific
+# ============================================================================
+
+# DreamGen — heavy artifacts (NOT to be committed)
+dreamgen_data/cosmos-predict2/       # ~250GB cloned repo + checkpoints
+dreamgen_data/data/                  # HF dataset frames + batch_input.json
+dreamgen_data/output/                # generated mp4s
+dreamgen_data/checkpoints/           # standalone ckpt dir if used
+
+# warp_score — calibration + results artifacts
+artifacts/
+results/
+*.npz
+*.h5
+*.csv
+
+# Logs
+*.log
+run.log
+
+# Models (we never commit large model files)
+*.pt
+*.bin
+*.safetensors
+
+# Heatmap PNG outputs from detection runs
+**/heatmaps/
+
+# Misc legacy artifacts
+files.zip
+
+# Allow specific small files we DO want tracked
+!warp_score/configs/*.yaml
+!tests/data/                         # small unit-test fixtures, if added later
