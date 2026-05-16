@@ -10,14 +10,15 @@
 # Override any variable on the command line:
 #   make calibrate ARTIFACTS=artifacts/v10 HIGH_DIR=/data/high DEVICE=cuda:1
 
-ARTIFACTS  ?= artifacts/v9_dreamgen
-HIGH_DIR   ?= ../image_no_bg/high
-LOW_DIR    ?= ../image_no_bg/low
+REPO_ROOT  := $(shell pwd)
+ARTIFACTS  ?= $(REPO_ROOT)/artifacts/v9_dreamgen
+HIGH_DIR   ?= $(REPO_ROOT)/data/image_no_bg/high
+LOW_DIR    ?= $(REPO_ROOT)/data/image_no_bg/low
 CONFIG     ?= warp_score/configs/default.yaml
 LABELS     ?= labels.csv
 DEVICE     ?= cuda
 
-UPLOAD_SCRIPT := /mnt/data/sftp/data/quangpt3/.claude/skills/upload-to-hf/upload.py
+UPLOAD_SCRIPT ?= /mnt/data/sftp/data/quangpt3/.claude/skills/upload-to-hf/upload.py
 PYTHON        := python
 
 .PHONY: install calibrate detect eval labels upload-samples \

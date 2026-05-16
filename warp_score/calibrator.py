@@ -122,12 +122,21 @@ class CalibrationArtifact:
                 if task_meta.get("has_per_pixel") and f"{slug}__per_pixel_var" in npz.files
                 else None
             )
+            try:
+                ivar_dist = npz[f"{slug}__ivar"]
+                peak_dist = npz[f"{slug}__peak"]
+                cert_dist = npz[f"{slug}__cert"]
+            except KeyError as e:
+                raise RuntimeError(
+                    f"Calibration file missing key {e} for task '{task_name}'. "
+                    f"File may be corrupted."
+                ) from e
             tasks[task_name] = TaskCalibration(
                 task=task_name,
                 n_refs=task_meta["n_refs"],
-                ivar_dist=npz[f"{slug}__ivar"],
-                peak_dist=npz[f"{slug}__peak"],
-                cert_dist=npz[f"{slug}__cert"],
+                ivar_dist=ivar_dist,
+                peak_dist=peak_dist,
+                cert_dist=cert_dist,
                 per_pixel_var=per_pixel,
             )
 

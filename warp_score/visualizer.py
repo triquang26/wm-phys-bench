@@ -67,7 +67,7 @@ class HeatmapPlotter:
         lines.append("")
         lines.append(f"  combined  p={result.p_combined:.4f}")
         lines.append(f"  H_score      ={result.H_score:.4f}")
-        lines.append(f"  threshold    >{1.0 - p}".format(p=result.p_combined))
+        lines.append(f"  threshold    >{1.0 - result.p_combined:.4f}")
         axes[2].text(
             0.0, 0.95, "\n".join(lines),
             ha="left", va="top",

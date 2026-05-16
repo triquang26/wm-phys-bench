@@ -30,6 +30,8 @@ class InteriorMask:
 
     def apply(self, fg_mask: np.ndarray) -> np.ndarray:
         """Return (H, W) bool: foreground after erosion."""
+        if fg_mask.ndim != 2:
+            raise ValueError(f"fg_mask must be 2D (H, W), got shape {fg_mask.shape}")
         return cv2.erode(
             fg_mask.astype(np.uint8),
             self._kernel,

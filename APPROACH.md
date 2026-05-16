@@ -1,5 +1,10 @@
 # Hallucination Detection via Warp Variance — Full Technical Writeup
 
+> **Implementation note (2026-05)**: This document describes the algorithm and methodology.
+> The current implementation lives in the `warp_score/` Python package.
+> Entry point: `python -m warp_score calibrate/detect/eval`.
+> `warp_variance_vis.py` is now a backward-compat shim.
+
 ## 1. Problem Context
 
 ### What is a hallucination here?

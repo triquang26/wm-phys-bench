@@ -8,17 +8,18 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Literal, Optional
 
+# Compute repo root relative to this file: warp_score/config.py → repo root is one level up
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_DATA_DIR = _REPO_ROOT / "data"
+
 
 @dataclass
 class WarpScoreConfig:
     # ── Paths ──────────────────────────────────────────────────────────────
-    root_dir: Path = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe")
-    high_dir: Path = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/high")
-    low_dir: Path = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/image_no_bg/low")
-    artifacts_dir: Path = Path(
-        "/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/"
-        "feature_matching_eval_hallucination/artifacts/v9_dreamgen"
-    )
+    root_dir: Path = field(default_factory=lambda: _REPO_ROOT)
+    high_dir: Path = field(default_factory=lambda: _DATA_DIR / "image_no_bg" / "high")
+    low_dir: Path = field(default_factory=lambda: _DATA_DIR / "image_no_bg" / "low")
+    artifacts_dir: Path = field(default_factory=lambda: _REPO_ROOT / "artifacts" / "v9_dreamgen")
 
     # ── RoMaV2 ─────────────────────────────────────────────────────────────
     setting: Literal["turbo", "fast", "base", "precise"] = "turbo"

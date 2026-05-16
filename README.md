@@ -44,6 +44,42 @@ make eval
 
 ---
 
+## Setup
+
+1. **Clone the repo** — you have it already.
+
+2. **Install the package** (use the `groot` conda env on this machine):
+   ```bash
+   conda activate groot
+   pip install -e .
+   ```
+
+3. **Set up the data directory** — `data/` is `.gitignore`d and not committed.
+   On this machine the symlinks are already created. For a new machine:
+   ```bash
+   mkdir -p data
+   ln -s /path/to/image_no_bg           data/image_no_bg
+   ln -s /path/to/cosmos_frames_raw     data/cosmos_frames_raw
+   ln -s /path/to/cosmos_synthetic_data data/cosmos_synthetic_data
+   # OR copy the actual directories there if you have the data locally
+   ```
+
+4. **RoMaV2** — the dense matcher. Source is bundled in `third_party/RoMaV2/`; weights
+   download automatically on first run. Add it to your PYTHONPATH:
+   ```bash
+   # Bundled copy (preferred):
+   export PYTHONPATH=$(pwd)/third_party/RoMaV2/src:$PYTHONPATH
+   # Or the shared checkout on this machine:
+   export PYTHONPATH=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/RoMaV2/src:$PYTHONPATH
+   ```
+
+5. **Run the pipeline**:
+   ```bash
+   bash scripts/run_pipeline.sh
+   ```
+
+---
+
 ## Data Layout
 
 ```
@@ -177,6 +213,7 @@ pytest tests/
 ```
 
 Test files cover `mask.py`, `signals.py`, and `statistics.py` using synthetic data.
+All 39 tests pass without a GPU.
 
 ---
 

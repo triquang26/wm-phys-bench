@@ -112,7 +112,10 @@ class WarpVarianceDetector:
         # ── Match against refs ────────────────────────────────────────────
         warps, certs, ok_refs = self._match_all(query_path, refs, fg_mask)
         if not warps:
-            raise RuntimeError(f"All refs failed to match for {query_path}")
+            raise RuntimeError(
+                f"All {len(refs)} refs failed to match for {query_path} "
+                f"(0/{len(refs)} succeeded)"
+            )
 
         warps_a = np.stack(warps)
         certs_a = np.stack(certs)
@@ -193,6 +196,7 @@ class WarpVarianceDetector:
         warps: list[np.ndarray] = []
         certs: list[np.ndarray] = []
         ok_refs: list[Path] = []
+        n_failed = 0
         for ref_path in refs:
             try:
                 m = self.matcher.match(query_path, ref_path, fg_mask=fg_mask)
@@ -200,7 +204,13 @@ class WarpVarianceDetector:
                 certs.append(m.cert)
                 ok_refs.append(ref_path)
             except Exception as e:
+                n_failed += 1
                 print(f"[detect] match failed {Path(ref_path).name}: {e}")
+        if n_failed:
+            print(
+                f"[detect] {len(ok_refs)}/{len(refs)} refs matched successfully "
+                f"({n_failed} failed) for {query_path.name}"
+            )
         return warps, certs, ok_refs
 
     def _compute_heatmap(

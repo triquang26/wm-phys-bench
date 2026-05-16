@@ -5,12 +5,14 @@
 #
 # Or copy this file as a new YAML and edit there (one YAML per experiment).
 
-# Paths — relative to feature_matching_eval_hallucination/ root
-# data/ is a .gitignored dir (symlinks or real dirs — see README)
-root_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination
-high_dir:       /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high
-low_dir:        /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/low
-artifacts_dir:  /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+# Paths — defaults are repo-relative (inferred from package location at runtime):
+#   high_dir:      <repo>/data/image_no_bg/high
+#   low_dir:       <repo>/data/image_no_bg/low
+#   artifacts_dir: <repo>/artifacts/v9_dreamgen
+# Uncomment and set these only if your data lives elsewhere:
+# high_dir:       /absolute/path/to/image_no_bg/high
+# low_dir:        /absolute/path/to/image_no_bg/low
+# artifacts_dir:  /absolute/path/to/artifacts
 
 # RoMaV2
 setting:         turbo

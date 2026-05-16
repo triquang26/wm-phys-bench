@@ -20,7 +20,12 @@
 set -e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="$REPO/data"
-ROMAV2=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/RoMaV2/src
+# RoMaV2 source path — override with: ROMAV2=/your/path bash scripts/run_pipeline.sh
+ROMAV2=${ROMAV2:-/mnt/data/sftp/data/quangpt3/gcvwm/calibration/RoMaV2/src}
+# Fallback: use bundled copy in third_party/ if external not found
+if [ ! -d "$ROMAV2" ]; then
+    ROMAV2="$REPO/third_party/RoMaV2/src"
+fi
 ARTIFACTS="$REPO/artifacts/v9_dreamgen"
 mkdir -p "$ARTIFACTS"
 
