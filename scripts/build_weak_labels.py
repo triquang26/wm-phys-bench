@@ -5,7 +5,7 @@ Scans query_low_dir/<task>/*.png   → label=1  (potentially hallucinated)
 
 Output CSV columns:
     task   : parent directory name (task identifier)
-    frame  : absolute path to the PNG
+    frame  : filename stem (matches summary.csv written by warp_score detect)
     split  : "high" or "low"
     label  : 0 or 1
 
@@ -19,19 +19,31 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
+import os
 import sys
 from pathlib import Path
+
+
+def _glob_follow(root: Path, pattern: str) -> list[Path]:
+    """glob for pattern under root, following symlinked directories."""
+    results = []
+    for dirpath, _, filenames in os.walk(root, followlinks=True):
+        for fn in filenames:
+            if fnmatch.fnmatch(fn, pattern):
+                results.append(Path(dirpath) / fn)
+    return sorted(results)
 
 
 def collect(root: Path, label: int, split: str) -> list[dict]:
     """Return a list of row dicts for all PNGs under root."""
     rows = []
-    for png in sorted(root.glob("**/*.png")):
+    for png in _glob_follow(root, "*.png"):
         task = png.parent.name
         rows.append(
             {
                 "task": task,
-                "frame": str(png),
+                "frame": png.stem,
                 "split": split,
                 "label": label,
             }
