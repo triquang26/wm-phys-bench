@@ -81,6 +81,8 @@ class HallucinationResult:
             row["H_score_maha"] = round(1.0 - maha_p, 6)
         if "ivar_px" in self.raw_per_signal:
             row["raw_ivar_px"] = round(self.raw_per_signal["ivar_px"], 6)
+        if "peak_maha" in self.raw_per_signal:
+            row["raw_peak_maha"] = round(self.raw_per_signal["peak_maha"], 6)
         return row
 
 
@@ -154,6 +156,7 @@ class WarpVarianceDetector:
             D_map, logdetΛ_map, _ = MahalanobisStatistics.ivar_per_pixel(warps_a, precisions_a)
             raw["ivar_maha"] = MahalanobisStatistics.interior_mean(D_map, interior_mask)
             raw["evidence"] = MahalanobisStatistics.interior_mean(-logdetΛ_map, interior_mask)
+            raw["peak_maha"] = MahalanobisStatistics.peak_max_z(D_map, interior_mask)
             # ivar_px: mean per-pixel empirical p-value using T_null — captures local anomalies
             if task_calib.T_null is not None:
                 p_px = per_pixel_p_value(D_map, task_calib.T_null, interior_mask)

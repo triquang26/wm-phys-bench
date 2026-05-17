@@ -191,10 +191,24 @@ class MahalanobisStatistics:
         return D_map, logdetΛ_map, mu_hat.astype(np.float32)
 
     # ------------------------------------------------------------------
-    # Scalar summary
+    # Scalar summaries
     # ------------------------------------------------------------------
     @staticmethod
     def interior_mean(map_2d: np.ndarray, interior_mask: np.ndarray) -> float:
         """Mean of map_2d over interior_mask pixels."""
         vals = map_2d[interior_mask]
         return float(vals.mean()) if vals.size > 0 else 0.0
+
+    @staticmethod
+    def peak_max_z(D_map: np.ndarray, interior_mask: np.ndarray) -> float:
+        """Peak Z-score of D_map within interior.
+
+        Unlike interior_mean (which is diluted by background-shifted pixels),
+        max Z-score is invariant to a uniform additive shift in D_map — making
+        it robust to domain gaps where all frames show elevated D_map.
+        """
+        vals = D_map[interior_mask]
+        if vals.size < 2 or vals.std() < 1e-8:
+            return 0.0
+        z = (D_map - vals.mean()) / (vals.std() + 1e-8)
+        return float(z[interior_mask].max())

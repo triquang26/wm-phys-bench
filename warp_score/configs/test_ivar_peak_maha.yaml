@@ -1,0 +1,14 @@
+# v9 ivar_maha + peak_maha — Cauchy combination
+# peak_maha is shift-invariant: robust to domain-shifted baselines (Pepper, Cucumber)
+# ivar_maha captures global disagreement, peak_maha captures concentrated anomalies
+signal_names:
+  - ivar_maha
+  - peak_maha
+fuser: cauchy
+per_pixel_calibration: true
+use_precision: true
+reference_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/reference
+query_high_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/high
+query_low_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/low
+artifacts_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/v9_ivar_peak_maha/results
+n_min_refs: 10

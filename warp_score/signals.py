@@ -105,12 +105,32 @@ class EvidenceSignal(Signal):
         return calib.evidence_dist
 
 
+class PeakMahaSignal(Signal):
+    """Peak Z-score of D_map within the interior.
+
+    Unlike ivar_maha (interior mean of D_map), the peak Z-score is invariant
+    to a uniform additive shift in D_map — robust to domain gaps where the
+    matcher consistently assigns high D to ALL frames (clean and hallu alike),
+    but hallucinated frames have a *structurally concentrated* peak.
+    """
+    name = "peak_maha"
+    direction = "high"
+
+    def get_distribution(self, calib: "TaskCalibration") -> np.ndarray:
+        if calib.peak_maha_dist is None:
+            raise RuntimeError(
+                "No peak_maha_dist in calibration (run calibrate with maha config)"
+            )
+        return calib.peak_maha_dist
+
+
 _REGISTRY: dict[str, type[Signal]] = {
     "ivar": IvarSignal,
-    "peak": PeakSignal,       # ablation-only
-    "cert": CertSignal,       # ablation-only
+    "peak": PeakSignal,           # v8 ablation-only
+    "cert": CertSignal,           # v8 ablation-only
     "ivar_maha": IvarMahaSignal,
     "evidence": EvidenceSignal,
+    "peak_maha": PeakMahaSignal,
 }
 
 
