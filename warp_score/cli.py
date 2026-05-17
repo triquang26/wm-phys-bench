@@ -113,7 +113,7 @@ def detect_cmd(args: argparse.Namespace) -> None:
     if args.query:
         queries = [Path(args.query)]
     elif args.query_dir:
-        queries = sorted(Path(args.query_dir).glob("**/*.png"))
+        queries = _glob_follow(Path(args.query_dir), "*.png", recursive=True)
     elif task_filter:
         high_task_dir = cfg.query_high_dir / task_filter
         low_task_dir = cfg.query_low_dir / task_filter
@@ -125,8 +125,8 @@ def detect_cmd(args: argparse.Namespace) -> None:
     else:
         # Default: scan BOTH query/high and query/low so a single run covers AUROC.
         queries = (
-            sorted(cfg.query_high_dir.glob("**/*.png"))
-            + sorted(cfg.query_low_dir.glob("**/*.png"))
+            _glob_follow(cfg.query_high_dir, "*.png", recursive=True)
+            + _glob_follow(cfg.query_low_dir, "*.png", recursive=True)
         )
     if not queries:
         raise RuntimeError("No queries found.")
@@ -189,9 +189,20 @@ def eval_cmd(args: argparse.Namespace) -> None:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+def _glob_follow(root: Path, pattern: str, recursive: bool = False) -> list[Path]:
+    """glob for `pattern` under `root`, following symlinked directories."""
+    import os, fnmatch
+    results = []
+    for dirpath, _, filenames in os.walk(root, followlinks=True):
+        for fn in filenames:
+            if fnmatch.fnmatch(fn, pattern):
+                results.append(Path(dirpath) / fn)
+    return sorted(results)
+
+
 def _discover_refs_by_task(root: Path) -> dict[str, list[Path]]:
     out: dict[str, list[Path]] = defaultdict(list)
-    for png in sorted(root.glob("**/*.png")):
+    for png in _glob_follow(root, "*.png", recursive=True):
         task = png.parent.name
         out[task].append(png)
     return dict(out)

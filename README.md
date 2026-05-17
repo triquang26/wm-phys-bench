@@ -4,6 +4,130 @@ A **training-free hallucination detector** for robot video frames. Given a query
 
 ---
 
+## Common Scenarios
+
+### 1. Score a single frame (no calibration needed — uses global fallback)
+
+```bash
+conda activate groot
+python -m warp_score --artifacts_dir artifacts/v1 \
+    detect --query data/query/low/0_Open\ the\ box/frame_0000.png
+# prints H_score to stdout; appends a row to artifacts/v1/summary.csv
+```
+
+### 2. Quick smoke test on one task end-to-end
+
+```bash
+ARTS=artifacts/smoke_task
+python -m warp_score --artifacts_dir $ARTS calibrate --task "0_Open the box"
+python -m warp_score --artifacts_dir $ARTS detect   --task "0_Open the box"
+# labels for this one task:
+python scripts/build_weak_labels.py \
+    --query_high_dir data/query/high --query_low_dir data/query/low \
+    --tasks "0_Open the box" --out /tmp/labels_smoke.csv
+python -m warp_score --artifacts_dir $ARTS eval --labels /tmp/labels_smoke.csv
+```
+
+Calibrate 1 task ≈ 2.5 min, detect ≈ 5 min on H100.
+
+### 3. Benchmark a custom subset of tasks
+
+Create a symlink directory pointing at the tasks you want:
+
+```bash
+python3 -c "
+import os, sys
+from pathlib import Path
+REPO = Path('.')
+tasks = ['0_Open the box', '2_Use the right hand to close the black drawer']
+for root, dest in [
+    ('data/reference',   '/tmp/myref'),
+    ('data/query/high',  '/tmp/myq_high'),
+    ('data/query/low',   '/tmp/myq_low'),
+]:
+    os.makedirs(dest, exist_ok=True)
+    for t in tasks:
+        src = (REPO / root / t).resolve()
+        link = f'{dest}/{t}'
+        if not os.path.lexists(link): os.symlink(src, link)
+"
+
+ARTS=artifacts/my_subset
+python -m warp_score --ref_dir /tmp/myref --artifacts_dir $ARTS calibrate
+python -m warp_score --ref_dir /tmp/myref \
+    --query_high_dir /tmp/myq_high --query_low_dir /tmp/myq_low \
+    --artifacts_dir  $ARTS detect
+# build labels for those tasks and eval:
+python scripts/build_weak_labels.py \
+    --query_high_dir /tmp/myq_high --query_low_dir /tmp/myq_low \
+    --out /tmp/labels_subset.csv
+python -m warp_score --artifacts_dir $ARTS eval --labels /tmp/labels_subset.csv
+```
+
+> **Note:** `--ref_dir`, `--query_high_dir`, `--query_low_dir` all follow symlinked directories correctly.
+
+### 4. Score a new video from scratch (inference only, no eval)
+
+```bash
+# 1. Extract frames
+python scripts/extract_frames.py \
+    --video_root /path/to/new_videos --out_root /tmp/new_frames --n_frames 50
+
+# 2. Background removal (optional but recommended)
+python scripts/sam3_process.py \
+    --frames_root /tmp/new_frames --out_root /tmp/new_clean
+
+# 3. Score against an existing calibration
+python -m warp_score --artifacts_dir artifacts/v1 \
+    detect --query_dir /tmp/new_clean
+# Results in artifacts/v1/summary.csv — H_score > 0.95 → likely hallucinated
+```
+
+### 5. Re-run eval on existing predictions with a new labels CSV
+
+Calibrate/detect outputs are cached in `artifacts_dir/summary.csv`. Re-run eval only:
+
+```bash
+python -m warp_score --artifacts_dir artifacts/v1 eval \
+    --labels new_labels.csv \
+    --pred   artifacts/v1/summary.csv \
+    --out    /tmp/eval_new.json
+```
+
+### 6. Use a faster matching setting to prototype quickly
+
+```bash
+# "fast" is ~2× faster than "turbo" (the default), ~5% AUROC drop
+python -m warp_score --setting fast --artifacts_dir artifacts/fast_run calibrate
+python -m warp_score --setting fast --artifacts_dir artifacts/fast_run detect
+```
+
+### 7. Generate new clean-reference videos (dreamgen pipeline)
+
+```bash
+export HF_TOKEN=hf_xxx
+cd dreamgen_data
+bash setup.sh              # one-time: installs cosmos-predict2, downloads ~250 GB checkpoints
+make smoke                 # sanity: 1 video (~3 min)
+make gen-query-high        # all 23 tasks, ~3.3 min/video on H100, seed_offset=2000
+make postprocess           # extract frames + SAM3 bg-removal → ../data/query/high_v2
+```
+
+---
+
+## Understanding H_score
+
+| H_score | Interpretation |
+|---|---|
+| 0.00 – 0.50 | Almost certainly clean — warp variance matches reference distribution |
+| 0.50 – 0.90 | Moderate anomaly — scene may have drifted |
+| 0.90 – 0.95 | High anomaly — likely hallucinated |
+| > 0.95 | Very likely hallucinated (default threshold `fpr_alpha=0.05`) |
+
+H_score is a **calibrated p-value complement**: `H_score = 1 - p`, where `p` is the probability that a clean reference frame would show equal or greater warp variance. Each task has its own null distribution (LOO calibration); tasks with no calibration fall back to the global distribution.
+
+---
+
 ## Environment Overview
 
 Two separate Python environments are used:
@@ -270,11 +394,14 @@ pytest tests/          # all tests pass without a GPU (~10 s)
 
 Tested on a single **NVIDIA H100 80 GB** (CUDA 12.1 / 12.6).
 
-| Step | Approx. time |
+| Step | Approx. time (H100, turbo) |
 |---|---|
-| Calibrate (23 tasks × 50 refs, turbo) | ~4 h |
-| Detect (23 tasks × 50 queries each split) | ~1–2 h |
-| cosmos-predict2 14B generation (23 videos) | ~1.3 h (~3.3 min/video) |
-| Postprocess (SAM3 bg-removal, 23 tasks × 50 frames) | ~20 min |
+| Calibrate 1 task (53 refs, LOO) | ~2.5 min |
+| Calibrate 23 tasks | ~60 min |
+| Detect 1 task (50 high + 53 low frames) | ~5 min |
+| Detect 23 tasks (2369 frames total) | ~2 h |
+| cosmos-predict2 14B generation (1 video, with refiner) | ~3.5 min |
+| cosmos-predict2 14B generation (23 videos) | ~1.3 h |
+| Postprocess SAM3 (1 task × 50 frames) | ~1 min |
 
-Use `setting: fast` in the config to trade ~5% accuracy for ~2× speed on calibrate/detect.
+Per-frame detect time is ~3.2 s/frame (3s RoMa match × N_refs). Use `--setting fast` to halve that at ~5% AUROC cost.
