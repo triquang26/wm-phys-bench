@@ -229,10 +229,19 @@ dreamgen_data/checkpoints/
 └── google-t5/t5-11b/                         # ~85 GB
 ```
 
-### Step 4 — Generate query/high videos (cosmos-predict2 14B)
+### Step 4 — Generate synthetic query videos (requires `dreamgen_data/.venv` and `HF_TOKEN`)
 
 ```bash
+export HF_TOKEN=hf_xxx
 cd dreamgen_data
+source cosmos-predict2/.venv/bin/activate
+
+# generate.py skips any <task>.mp4 that already exists — safe to resume
+python generate.py \
+    --prompts prompts.json \
+    --save_dir ../data/cosmos_synthetic_data/query/high
+
+# Or equivalently via make (same underlying command):
 make gen-query-high   # 23 tasks × 1 video = 23 MP4s, ~3.3 min/video on H100
                       # output: ../data/cosmos_synthetic_data/query/high/<task>.mp4
 ```
@@ -242,7 +251,19 @@ Requires per-task conditioning images under `data/cosmos_inputs/<task>.png` (fir
 ### Step 5 — Extract frames + background removal
 
 ```bash
-# Extract reference MP4s → PNG frames
+# postprocess.py: extract 50 uniform frames per video + SAM3 bg removal (skips existing output)
+cd dreamgen_data
+source cosmos-predict2/.venv/bin/activate
+
+python postprocess.py \
+    --video_root ../data/cosmos_synthetic_data/query/high \
+    --out_root   ../data/query/high
+
+# Or equivalently via make:
+make postprocess   # ../data/cosmos_synthetic_data/query/high → ../data/query/high
+
+# Extract reference MP4s → PNG frames (uses groot env, not dreamgen venv)
+conda activate groot
 python scripts/extract_frames.py \
     --video_root data/cosmos_synthetic_data/reference \
     --out_root   data/cosmos_frames_raw/reference \
@@ -252,10 +273,6 @@ python scripts/extract_frames.py \
 python scripts/sam3_process.py \
     --frames_root data/cosmos_frames_raw/reference \
     --out_root    data/reference
-
-# Same for query/high (via dreamgen postprocess)
-cd dreamgen_data
-make postprocess   # ../data/cosmos_synthetic_data/query/high → ../data/query/high
 
 # Same for query/low (pre-existing hallucinated frames)
 python scripts/sam3_process.py \
@@ -317,6 +334,32 @@ Background pixels are exactly `(127, 127, 127)` — the foreground mask relies o
 | `warp_score/cli.py` | `python -m warp_score` entrypoint — `calibrate`, `detect`, `eval` subcommands. |
 | `dreamgen_data/` | cosmos-predict2 generation pipeline — see `dreamgen_data/README.md` or `make help` there. |
 | `scripts/build_weak_labels.py` | Build `labels.csv` from query/high + query/low directories. |
+
+---
+
+## Utility Scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/viz_matching.py` | Visualize RoMa dense correspondences between a query frame and its references. Useful for debugging matcher quality. |
+| `scripts/run_pipeline.sh` | Shell wrapper that runs calibrate → detect → eval in sequence for a given artifacts dir. |
+
+Example — visualize matches for one task:
+
+```bash
+python scripts/viz_matching.py \
+    --task "0_Open the box" \
+    --frames frame_0000,frame_0001 \
+    --n_refs 3 --n_kpts 150 \
+    --out_dir /tmp/viz_matching
+```
+
+Example — run the full pipeline end-to-end:
+
+```bash
+conda activate groot
+bash scripts/run_pipeline.sh   # skips already-completed steps automatically
+```
 
 ---
 

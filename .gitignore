@@ -112,6 +112,9 @@ artifacts/ref_indices.npy
 artifacts/sigma_ref.npy
 
 # Subdirs inside artifacts with only large/binary content
+artifacts/bench*/
+artifacts/test_*/
+artifacts/v2_full/
 artifacts/comparison_v2_fixed/
 artifacts/comparison_videos/
 artifacts/heatmaps/
