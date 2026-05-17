@@ -83,13 +83,17 @@ def _import_cosmos():
     from cosmos_predict2.configs.base.config_video2world import (
         get_cosmos_predict2_video2world_pipeline,
     )
-    from imaginaire.constants import get_cosmos_predict2_video2world_checkpoint
+    from imaginaire.constants import (
+        get_cosmos_predict2_video2world_checkpoint,
+        get_cosmos_predict2_gr00t_checkpoint,
+    )
     from imaginaire.utils.io import save_image_or_video
 
     return {
         "Video2WorldPipeline": Video2WorldPipeline,
         "get_pipeline_config": get_cosmos_predict2_video2world_pipeline,
         "get_dit_path": get_cosmos_predict2_video2world_checkpoint,
+        "get_gr00t_dit_path": get_cosmos_predict2_gr00t_checkpoint,
         "save_image_or_video": save_image_or_video,
     }
 
@@ -190,13 +194,23 @@ class PipelineFactory:
             config.prompt_refiner_config.enabled = False
             print("[generate] prompt refiner disabled")
 
-        # 3. resolve the .pt path
-        dit_path = cosmos["get_dit_path"](
-            model_size=profile.model_size,
-            resolution=resolution,
-            fps=fps,
-            aspect_ratio=profile.aspect_ratio,
-        )
+        # 3. resolve the .pt path (GR00T fine-tune or base model)
+        if profile.gr00t_variant:
+            dit_path = cosmos["get_gr00t_dit_path"](
+                gr00t_variant=profile.gr00t_variant,
+                model_size=profile.model_size,
+                resolution=resolution,
+                fps=fps,
+                aspect_ratio=profile.aspect_ratio,
+            )
+            print(f"[generate] GR00T variant={profile.gr00t_variant}, dit={Path(dit_path).name}")
+        else:
+            dit_path = cosmos["get_dit_path"](
+                model_size=profile.model_size,
+                resolution=resolution,
+                fps=fps,
+                aspect_ratio=profile.aspect_ratio,
+            )
         if not Path(dit_path).exists():
             raise FileNotFoundError(
                 f"DiT checkpoint not found: {dit_path}. Did setup.sh download "
@@ -301,8 +315,9 @@ class BulkGenerator:
     # ---- internals --------------------------------------------------------
 
     def _gen_one(self, pipe, prompt: str, input_path: str, out_path: Path, seed: int) -> None:
+        full_prompt = self.profile.prompt_prefix + prompt
         result = pipe(
-            prompt=prompt,
+            prompt=full_prompt,
             negative_prompt=self.profile.negative_prompt,
             aspect_ratio=self.profile.aspect_ratio,
             input_path=input_path,
@@ -312,12 +327,14 @@ class BulkGenerator:
             use_cuda_graphs=False,
             return_prompt=True,
         )
-        if isinstance(result, tuple) and len(result) == 2:
+        if isinstance(result, tuple):
+            if len(result) != 2:
+                raise TypeError(f"Expected (video, prompt) tuple from pipe(), got length {len(result)}")
             video, _prompt_used = result
         else:
             video = result
         if video is None:
-            raise RuntimeError("pipe(...) returned video=None (guardrail rejected?)")
+            raise RuntimeError("pipe() returned video=None — guardrail may have rejected the prompt")
         # Use the cosmos-bundled saver (handles tensor -> mp4 + pyav)
         save_fn = self.factory.cosmos["save_image_or_video"]
         save_fn(video, str(out_path), fps=self.factory.fps_for_save)
@@ -368,19 +385,21 @@ def main() -> None:
                     help="Dir holding nvidia/Cosmos-Predict2-* and google-t5/t5-11b.")
     ap.add_argument("--seed_offset", type=int, default=1000,
                     help="seed = seed_offset + prompt_index (default: 1000)")
+    ap.add_argument("--profile", default="high", choices=["high", "gr00t"],
+                    help="Generation profile: 'high' (base 14B) or 'gr00t' (GR1 fine-tune)")
     args = ap.parse_args()
 
     prompts = json.loads(args.prompts.read_text())
     if not isinstance(prompts, list) or not all("task" in p and "prompt" in p for p in prompts):
         raise ValueError(f"{args.prompts}: expected list of dicts with 'task' and 'prompt'")
-    print(f"[generate] {len(prompts)} prompts; seed_offset={args.seed_offset}")
+    print(f"[generate] {len(prompts)} prompts; seed_offset={args.seed_offset}; profile={args.profile}")
 
     input_dirs = list(args.input_dir or [])
     fallback = _default_fallback_input()
     if fallback is not None:
         print(f"[generate] fallback conditioning frame: {fallback}")
 
-    profile = from_name("high")
+    profile = from_name(args.profile)
     factory = PipelineFactory(args.ckpt_root)
     BulkGenerator(factory, profile, args.save_dir, input_dirs, fallback).run(
         prompts, seed_offset=args.seed_offset

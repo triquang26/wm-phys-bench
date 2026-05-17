@@ -1,7 +1,7 @@
 [
   {
     "task": "0_Open the box",
-    "prompt": "Open the box"
+    "prompt": "Use both robot hands to grab the flaps of the cardboard box and lift them upward, opening the box from closed to fully open."
   },
   {
     "task": "0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.",

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# setup.sh -- install cosmos-predict2 + download the GR00T-Dreams-GR1 checkpoint
-# (2B Video2World variant) used by the dreamgen pipeline.
+# setup.sh -- install cosmos-predict2 + download checkpoints used by the dreamgen pipeline.
+# Models downloaded:
+#   - nvidia/Cosmos-Predict2-14B-Video2World   (HIGH profile DiT)
+#   - nvidia/Cosmos-Predict2-2B-Video2World    (optional; smaller/faster)
+#   - nvidia/Cosmos-Predict2-14B-Sample-GR00T-Dreams-GR1  (GR00T fine-tune DiT)
+#   - nvidia/Cosmos-Reason1-7B                (prompt refiner for HIGH profile)
+#   - google-t5/t5-11b                        (text encoder)
 #
 # This is idempotent: each step short-circuits if its product already exists.
 # Logs everything to setup.log (in addition to stdout).
@@ -175,12 +180,13 @@ from huggingface_hub import snapshot_download
 
 # Pinned revisions copied from cosmos-predict2 scripts/download_checkpoints.py
 PINS = {
-    "nvidia/Cosmos-Predict2-2B-Video2World": "f50c09f5d8ab133a90cac3f4886a6471e9ba3f18",
-    "google-t5/t5-11b":                      "90f37703b3334dfe9d2b009bfcbfbf1ac9d28ea3",
-    "nvidia/Cosmos-Guardrail1":              "d6d4bfa899a71454a700907664f3e88f503950cf",
+    "nvidia/Cosmos-Predict2-14B-Video2World": "03b03a377fede782647afac998f674d9f358e319",
+    "nvidia/Cosmos-Predict2-2B-Video2World":  "f50c09f5d8ab133a90cac3f4886a6471e9ba3f18",
+    "google-t5/t5-11b":                       "90f37703b3334dfe9d2b009bfcbfbf1ac9d28ea3",
+    "nvidia/Cosmos-Reason1-7B":               "8fe96c1fa10db9e666b6fa6a87fea57dd9635649",
+    "nvidia/Cosmos-Guardrail1":               "d6d4bfa899a71454a700907664f3e88f503950cf",
 }
-# (Llama-Guard-3-8B and Cosmos-Reason1-7B are heavy and only needed when
-# guardrail / prompt refiner are enabled. We disable both in profiles.py.)
+# Llama-Guard-3-8B is only needed with guardrail enabled; disabled in profiles.py.
 
 root = Path("checkpoints").resolve()
 for repo_id, rev in PINS.items():
@@ -199,7 +205,7 @@ for repo_id, rev in PINS.items():
     print(f"[ckpt] done: {repo_id}")
 
 # Record the headline revision for reproducibility
-Path("_ckpt_revision.txt").write_text(PINS["nvidia/Cosmos-Predict2-2B-Video2World"])
+Path("_ckpt_revision.txt").write_text(PINS["nvidia/Cosmos-Predict2-14B-Video2World"])
 print("[ckpt] all done")
 PY
 

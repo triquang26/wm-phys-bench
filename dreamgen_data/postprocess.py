@@ -18,6 +18,7 @@ Reuses existing utilities (no logic duplication):
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -117,10 +118,8 @@ class QueryHighHarvester:
                         png, self.prompts, threshold=self.sam3_threshold
                     )
                     if alpha is None:
-                        # No mask found at all -- copy raw frame so downstream
-                        # tooling never sees a missing index. SAM3 caller would
-                        # otherwise drop the frame entirely.
-                        import shutil
+                        # No mask found — copy raw frame so downstream never sees
+                        # a missing index. SAM3 caller would otherwise drop it.
                         shutil.copyfile(png, out_png)
                         continue
                     out_img = seg.remove_background(png, alpha)
