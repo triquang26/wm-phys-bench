@@ -180,3 +180,6 @@ third_party/**/__pycache__/
 
 # labels.csv is small enough to track
 !labels.csv
+
+# Skill metadata — contains default token placeholder, not committed
+.claude/skills/upload-to-hf/SKILL.md

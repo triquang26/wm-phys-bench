@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_TOKEN = "REDACTED_HF_TOKEN"
+DEFAULT_TOKEN = os.environ.get("HF_TOKEN", "")
 DEFAULT_REPO = "twanghcmut/feepe-uploads"
 DEFAULT_BUCKET = "twanghcmut/claude-codecode"
 
