@@ -76,6 +76,12 @@ def main() -> None:
     # sam3.py lives in the repo root (feature_matching_eval_hallucination/)
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
+    sam3_path = repo_root / "sam3.py"
+    if not sam3_path.exists():
+        raise FileNotFoundError(
+            f"sam3.py not found at {sam3_path}. "
+            "Copy or symlink it from the parent feepe/ directory first."
+        )
     from sam3 import SAM3Segmenter, PROMPTS
 
     print(f"Loading SAM3 model on {args.device}…")
