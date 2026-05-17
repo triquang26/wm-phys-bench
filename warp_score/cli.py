@@ -134,8 +134,8 @@ def detect_cmd(args: argparse.Namespace) -> None:
 
     cfg.artifacts_dir.mkdir(parents=True, exist_ok=True)
     csv_path = cfg.summary_csv
-    write_header = not csv_path.exists()
-    with open(csv_path, "a", newline="") as csvf:
+    write_header = True
+    with open(csv_path, "w", newline="") as csvf:
         writer: csv.DictWriter | None = None
         for qi, qpath in enumerate(queries):
             logger.info(f"[{qi+1}/{len(queries)}] {qpath.parent.name}/{qpath.name}")
@@ -145,11 +145,12 @@ def detect_cmd(args: argparse.Namespace) -> None:
                 logger.error(f"detect failed: {e}")
                 continue
 
-            # Infer split from path: query/high → "high", query/low → "low".
-            qstr = str(qpath).replace("\\", "/")
-            if "query/high" in qstr:
+            # Infer split by checking which configured query dir the path lives under.
+            # Use str prefix on original (non-resolved) path so symlinked dirs work.
+            qstr = str(qpath)
+            if qstr.startswith(str(cfg.query_high_dir)):
                 result.split = "high"
-            elif "query/low" in qstr:
+            elif qstr.startswith(str(cfg.query_low_dir)):
                 result.split = "low"
             else:
                 result.split = ""
