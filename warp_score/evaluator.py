@@ -69,7 +69,7 @@ class Evaluator:
         labels = self._load_labels()
         preds = self._load_predictions()
 
-        # Inner-join on (task, frame)
+        # Inner-join on (task, split, frame) — frame names can collide across splits
         keys = set(labels.keys()) & set(preds.keys())
         if not keys:
             raise RuntimeError(
@@ -91,19 +91,19 @@ class Evaluator:
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _load_labels(self) -> dict[tuple[str, str], int]:
-        out: dict[tuple[str, str], int] = {}
+    def _load_labels(self) -> dict[tuple[str, str, str], int]:
+        out: dict[tuple[str, str, str], int] = {}
         with open(self.labels_csv, "r") as f:
             for row in csv.DictReader(f):
-                key = (row["task"], row["frame"])
+                key = (row["task"], row.get("split", ""), row["frame"])
                 out[key] = int(row["label"])
         return out
 
-    def _load_predictions(self) -> dict[tuple[str, str], float]:
-        out: dict[tuple[str, str], float] = {}
+    def _load_predictions(self) -> dict[tuple[str, str, str], float]:
+        out: dict[tuple[str, str, str], float] = {}
         with open(self.predictions_csv, "r") as f:
             for row in csv.DictReader(f):
-                key = (row["task"], row["frame"])
+                key = (row["task"], row.get("split", ""), row["frame"])
                 out[key] = float(row["H_score"])
         return out
 
