@@ -272,11 +272,12 @@ class BulkGenerator:
         self.input_dirs = input_dirs
         self.fallback_input = fallback_input
 
-    def run(self, prompts: list[dict], seed_offset: int = 0) -> dict:
+    def run(self, prompts: list[dict], seed_offset: int = 0, n_per_task: int = 1) -> dict:
         pipe = self.factory.get(self.profile)
         meta = {
             "profile": asdict(self.profile),
             "seed_offset": seed_offset,
+            "n_per_task": n_per_task,
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "host": socket.gethostname(),
             "git_sha": _git_sha(SCRIPT_DIR.parent),
@@ -287,33 +288,41 @@ class BulkGenerator:
 
         for i, item in enumerate(prompts):
             task = item["task"]
-            out = self.save_dir / f"{task}.mp4"
-            if out.exists():
-                print(f"[gen] skip (exists): {task}")
-                meta["items"].append({"task": task, "seed": None, "status": "skipped"})
-                continue
-
-            seed = seed_offset + i
             input_path = resolve_input_path(task, self.input_dirs) or self.fallback_input
             if input_path is None:
                 msg = f"no input image found (input_dirs={self.input_dirs}, no fallback)"
                 print(f"[gen] FAIL {task}: {msg}")
-                meta["items"].append({"task": task, "seed": seed, "status": f"fail: {msg}"})
+                meta["items"].append({"task": task, "seed": None, "status": f"fail: {msg}"})
                 continue
 
-            t0 = time.time()
-            try:
-                self._gen_one(pipe, item["prompt"], str(input_path), out, seed)
-                dt = time.time() - t0
-                print(f"[gen] {task} -> {out.name} (input={input_path.name}, seed={seed}, {dt:.1f}s)")
-                meta["items"].append({
-                    "task": task, "seed": seed, "status": "ok",
-                    "duration_s": round(dt, 1),
-                    "input_path": str(input_path),
-                })
-            except Exception as e:
-                print(f"[gen] FAIL {task}: {e}")
-                meta["items"].append({"task": task, "seed": seed, "status": f"fail: {e}"})
+            for vid_idx in range(n_per_task):
+                if n_per_task == 1:
+                    out = self.save_dir / f"{task}.mp4"
+                else:
+                    task_dir = self.save_dir / task
+                    task_dir.mkdir(parents=True, exist_ok=True)
+                    out = task_dir / f"v{vid_idx:04d}.mp4"
+
+                if out.exists():
+                    print(f"[gen] skip (exists): {task}" + (f" v{vid_idx:04d}" if n_per_task > 1 else ""))
+                    meta["items"].append({"task": task, "vid_idx": vid_idx, "seed": None, "status": "skipped"})
+                    continue
+
+                seed = seed_offset + i * n_per_task + vid_idx
+                t0 = time.time()
+                try:
+                    self._gen_one(pipe, item["prompt"], str(input_path), out, seed)
+                    dt = time.time() - t0
+                    label = f"{task}" + (f" v{vid_idx:04d}" if n_per_task > 1 else "")
+                    print(f"[gen] {label} -> {out.name} (seed={seed}, {dt:.1f}s)")
+                    meta["items"].append({
+                        "task": task, "vid_idx": vid_idx, "seed": seed, "status": "ok",
+                        "duration_s": round(dt, 1),
+                        "input_path": str(input_path),
+                    })
+                except Exception as e:
+                    print(f"[gen] FAIL {task} v{vid_idx:04d}: {e}")
+                    meta["items"].append({"task": task, "vid_idx": vid_idx, "seed": seed, "status": f"fail: {e}"})
 
         meta["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         (self.save_dir / "_run_meta.json").write_text(
@@ -395,7 +404,11 @@ def main() -> None:
     ap.add_argument("--profile", default="high", choices=["high", "gr00t"],
                     help="Generation profile: 'high' (base 14B) or 'gr00t' (GR1 fine-tune)")
     ap.add_argument("--seed_offset", type=int, default=None,
-                    help="seed = seed_offset + prompt_index (default: profile.base_seed)")
+                    help="seed = seed_offset + task_idx * n_per_task + vid_idx (default: profile.base_seed)")
+    ap.add_argument("--n_per_task", type=int, default=1,
+                    help="Number of videos to generate per task (default: 1)")
+    ap.add_argument("--tasks", type=str, default=None,
+                    help="Comma-separated task names to generate (default: all prompts)")
     args = ap.parse_args()
 
     profile = from_name(args.profile)
@@ -405,7 +418,15 @@ def main() -> None:
     prompts = json.loads(args.prompts.read_text())
     if not isinstance(prompts, list) or not all("task" in p and "prompt" in p for p in prompts):
         raise ValueError(f"{args.prompts}: expected list of dicts with 'task' and 'prompt'")
-    print(f"[generate] {len(prompts)} prompts; seed_offset={args.seed_offset}; profile={args.profile}")
+
+    if args.tasks:
+        task_filter = {t.strip() for t in args.tasks.split(",")}
+        prompts = [p for p in prompts if p["task"] in task_filter]
+        if not prompts:
+            raise ValueError(f"No prompts matched --tasks filter: {args.tasks}")
+
+    print(f"[generate] {len(prompts)} prompts; n_per_task={args.n_per_task}; "
+          f"seed_offset={args.seed_offset}; profile={args.profile}")
 
     input_dirs = list(args.input_dir or [])
     fallback = _default_fallback_input()
@@ -414,7 +435,7 @@ def main() -> None:
 
     factory = PipelineFactory(args.ckpt_root)
     BulkGenerator(factory, profile, args.save_dir, input_dirs, fallback).run(
-        prompts, seed_offset=args.seed_offset
+        prompts, seed_offset=args.seed_offset, n_per_task=args.n_per_task
     )
 
 
