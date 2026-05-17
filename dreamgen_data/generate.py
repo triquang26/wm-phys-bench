@@ -272,7 +272,8 @@ class BulkGenerator:
         self.input_dirs = input_dirs
         self.fallback_input = fallback_input
 
-    def run(self, prompts: list[dict], seed_offset: int = 0, n_per_task: int = 1) -> dict:
+    def run(self, prompts: list[dict], seed_offset: int = 0, n_per_task: int = 1,
+            num_steps: int = 35) -> dict:
         pipe = self.factory.get(self.profile)
         meta = {
             "profile": asdict(self.profile),
@@ -311,7 +312,8 @@ class BulkGenerator:
                 seed = seed_offset + i * n_per_task + vid_idx
                 t0 = time.time()
                 try:
-                    self._gen_one(pipe, item["prompt"], str(input_path), out, seed)
+                    self._gen_one(pipe, item["prompt"], str(input_path), out, seed,
+                                 num_steps=num_steps)
                     dt = time.time() - t0
                     label = f"{task}" + (f" v{vid_idx:04d}" if n_per_task > 1 else "")
                     print(f"[gen] {label} -> {out.name} (seed={seed}, {dt:.1f}s)")
@@ -332,7 +334,8 @@ class BulkGenerator:
 
     # ---- internals --------------------------------------------------------
 
-    def _gen_one(self, pipe, prompt: str, input_path: str, out_path: Path, seed: int) -> None:
+    def _gen_one(self, pipe, prompt: str, input_path: str, out_path: Path, seed: int,
+                 num_steps: int = 35) -> None:
         full_prompt = self.profile.prompt_prefix + prompt
         result = pipe(
             prompt=full_prompt,
@@ -342,7 +345,8 @@ class BulkGenerator:
             num_conditional_frames=self.profile.num_conditional_frames,
             guidance=self.profile.guidance,
             seed=seed,
-            use_cuda_graphs=False,
+            num_sampling_step=num_steps,
+            use_cuda_graphs=True,
             return_prompt=True,
         )
         if isinstance(result, tuple):
@@ -409,6 +413,8 @@ def main() -> None:
                     help="Number of videos to generate per task (default: 1)")
     ap.add_argument("--tasks", type=str, default=None,
                     help="Comma-separated task names to generate (default: all prompts)")
+    ap.add_argument("--num_steps", type=int, default=35,
+                    help="Denoising steps (default 35 = full quality; 30 = ~15%% faster)")
     args = ap.parse_args()
 
     profile = from_name(args.profile)
@@ -435,7 +441,8 @@ def main() -> None:
 
     factory = PipelineFactory(args.ckpt_root)
     BulkGenerator(factory, profile, args.save_dir, input_dirs, fallback).run(
-        prompts, seed_offset=args.seed_offset, n_per_task=args.n_per_task
+        prompts, seed_offset=args.seed_offset, n_per_task=args.n_per_task,
+        num_steps=args.num_steps,
     )
 
 
