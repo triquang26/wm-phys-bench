@@ -1,0 +1,20 @@
+# v9 — precision-matrix hallucination detector
+#
+# Activates the new Mahalanobis pipeline; leaves default.yaml untouched.
+#
+# Signal pipeline:
+#   ivar_maha — Cochran deviance D(p) averaged over interior (direction: high)
+#   evidence  — mean -log det Λ(p) over interior (direction: high)
+#
+# Fuser:
+#   cauchy — valid under arbitrary inter-signal dependence (Liu & Xie 2020)
+#
+# Per-pixel calibration stores T_null: (N, H, W) D_map null distributions
+# in the calibration npz for per-pixel hallucination heatmaps.
+
+signal_names:
+  - ivar_maha
+  - evidence
+fuser: cauchy
+per_pixel_calibration: true
+use_precision: true

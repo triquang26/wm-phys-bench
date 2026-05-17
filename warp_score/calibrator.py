@@ -24,7 +24,7 @@ from tqdm import tqdm
 from .config import WarpScoreConfig
 from .mask import ForegroundMask, InteriorMask
 from .matcher import RoMaMatcher
-from .statistics import CertWeightedStatistics
+from .statistics import CertWeightedStatistics, MahalanobisStatistics
 
 
 @dataclass
@@ -34,7 +34,11 @@ class TaskCalibration:
     ivar_dist: np.ndarray              # (N,) sorted ascending
     peak_dist: np.ndarray              # (N,) sorted ascending
     cert_dist: np.ndarray              # (N,) sorted ascending
-    per_pixel_var: Optional[np.ndarray] = None   # (N, H, W) sorted ascending along axis 0
+    per_pixel_var: Optional[np.ndarray] = None    # (N, H, W) sorted ascending along axis 0
+    # v9 precision-matrix fields
+    ivar_maha_dist: Optional[np.ndarray] = None   # (N,) sorted ascending
+    evidence_dist: Optional[np.ndarray] = None    # (N,) sorted ascending
+    T_null: Optional[np.ndarray] = None           # (N, H, W) D_map null, sorted ascending along axis 0
 
     @property
     def mean_ivar(self) -> float:
@@ -76,15 +80,28 @@ class CalibrationArtifact:
                 "mean_ivar": tc.mean_ivar,
                 "std_ivar": tc.std_ivar,
                 "has_per_pixel": tc.per_pixel_var is not None,
+                "has_ivar_maha": tc.ivar_maha_dist is not None,
+                "has_evidence": tc.evidence_dist is not None,
+                "has_T_null": tc.T_null is not None,
             }
             if tc.per_pixel_var is not None:
                 npz_data[f"{slug}__per_pixel_var"] = tc.per_pixel_var.astype(np.float32)
+            if tc.ivar_maha_dist is not None:
+                npz_data[f"{slug}__ivar_maha"] = tc.ivar_maha_dist.astype(np.float32)
+            if tc.evidence_dist is not None:
+                npz_data[f"{slug}__evidence"] = tc.evidence_dist.astype(np.float32)
+            if tc.T_null is not None:
+                npz_data[f"{slug}__T_null"] = tc.T_null.astype(np.float32)
 
         # Global
         g = self.global_
         npz_data["__global__ivar"] = g.ivar_dist
         npz_data["__global__peak"] = g.peak_dist
         npz_data["__global__cert"] = g.cert_dist
+        if g.ivar_maha_dist is not None:
+            npz_data["__global__ivar_maha"] = g.ivar_maha_dist.astype(np.float32)
+        if g.evidence_dist is not None:
+            npz_data["__global__evidence"] = g.evidence_dist.astype(np.float32)
 
         np.savez_compressed(path, **npz_data)
 
@@ -95,6 +112,8 @@ class CalibrationArtifact:
                 "n_refs": g.n_refs,
                 "mean_ivar": g.mean_ivar,
                 "std_ivar": g.std_ivar,
+                "has_ivar_maha": g.ivar_maha_dist is not None,
+                "has_evidence": g.evidence_dist is not None,
             },
             "config_snapshot": self.config_snapshot,
             "created_at": self.created_at,
@@ -122,6 +141,22 @@ class CalibrationArtifact:
                 if task_meta.get("has_per_pixel") and f"{slug}__per_pixel_var" in npz.files
                 else None
             )
+            # v9 precision-matrix fields
+            ivar_maha_dist = (
+                npz[f"{slug}__ivar_maha"]
+                if task_meta.get("has_ivar_maha") and f"{slug}__ivar_maha" in npz.files
+                else None
+            )
+            evidence_dist = (
+                npz[f"{slug}__evidence"]
+                if task_meta.get("has_evidence") and f"{slug}__evidence" in npz.files
+                else None
+            )
+            T_null = (
+                npz[f"{slug}__T_null"]
+                if task_meta.get("has_T_null") and f"{slug}__T_null" in npz.files
+                else None
+            )
             try:
                 ivar_dist = npz[f"{slug}__ivar"]
                 peak_dist = npz[f"{slug}__peak"]
@@ -138,15 +173,32 @@ class CalibrationArtifact:
                 peak_dist=peak_dist,
                 cert_dist=cert_dist,
                 per_pixel_var=per_pixel,
+                ivar_maha_dist=ivar_maha_dist,
+                evidence_dist=evidence_dist,
+                T_null=T_null,
             )
 
+        global_meta = meta.get("global", {})
+        global_ivar_maha = (
+            npz["__global__ivar_maha"]
+            if global_meta.get("has_ivar_maha") and "__global__ivar_maha" in npz.files
+            else None
+        )
+        global_evidence = (
+            npz["__global__evidence"]
+            if global_meta.get("has_evidence") and "__global__evidence" in npz.files
+            else None
+        )
         global_ = TaskCalibration(
             task="__global__",
-            n_refs=int(meta["global"]["n_refs"]),
+            n_refs=int(global_meta["n_refs"]),
             ivar_dist=npz["__global__ivar"],
             peak_dist=npz["__global__peak"],
             cert_dist=npz["__global__cert"],
             per_pixel_var=None,
+            ivar_maha_dist=global_ivar_maha,
+            evidence_dist=global_evidence,
+            T_null=None,
         )
 
         return cls(
@@ -213,7 +265,10 @@ class EmpiricalNullCalibrator:
         ivars: list[float] = []
         peaks: list[float] = []
         certs: list[float] = []
+        ivar_mahas: list[float] = []
+        evidences: list[float] = []
         per_pixel_maps: list[np.ndarray] = []
+        T_null_maps: list[np.ndarray] = []
 
         for q_idx, query_path in enumerate(
             tqdm(paths, desc=f"  {task[:40]}", leave=False, unit="frame"),
@@ -227,6 +282,12 @@ class EmpiricalNullCalibrator:
             certs.append(stats["cert"])
             if self.config.per_pixel_calibration:
                 per_pixel_maps.append(stats["var_map"])
+            # v9 maha fields (only present when all refs returned precision)
+            if "ivar_maha" in stats:
+                ivar_mahas.append(stats["ivar_maha"])
+                evidences.append(stats["evidence"])
+                if self.config.per_pixel_calibration and "D_map" in stats:
+                    T_null_maps.append(stats["D_map"])
 
         if not ivars:
             print(f"[calibrate] '{task}' produced no valid LOO stats")
@@ -242,6 +303,16 @@ class EmpiricalNullCalibrator:
             stacked = np.stack(per_pixel_maps).astype(np.float32)  # (N, H, W)
             per_pixel_arr = np.sort(stacked, axis=0)
 
+        # v9: precision-matrix distributions
+        ivar_maha_arr: Optional[np.ndarray] = None
+        evidence_arr: Optional[np.ndarray] = None
+        T_null_arr: Optional[np.ndarray] = None
+        if ivar_mahas:
+            ivar_maha_arr = np.sort(np.asarray(ivar_mahas, dtype=np.float32))
+            evidence_arr = np.sort(np.asarray(evidences, dtype=np.float32))
+        if T_null_maps:
+            T_null_arr = np.sort(np.stack(T_null_maps).astype(np.float32), axis=0)
+
         return TaskCalibration(
             task=task,
             n_refs=len(ivars),
@@ -249,6 +320,9 @@ class EmpiricalNullCalibrator:
             peak_dist=peak_arr,
             cert_dist=cert_arr,
             per_pixel_var=per_pixel_arr,
+            ivar_maha_dist=ivar_maha_arr,
+            evidence_dist=evidence_arr,
+            T_null=T_null_arr,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -272,11 +346,14 @@ class EmpiricalNullCalibrator:
 
         warps: list[np.ndarray] = []
         cert_maps: list[np.ndarray] = []
+        precisions: list[np.ndarray] = []
         for ref_path in refs:
             try:
                 m = self.matcher.match(query_path, ref_path, fg_mask=fg_mask)
                 warps.append(m.warp)
                 cert_maps.append(m.cert)
+                if m.precision is not None:
+                    precisions.append(m.precision)
             except Exception as e:
                 print(f"[calibrate] match failed {Path(ref_path).name}: {e}")
 
@@ -286,21 +363,46 @@ class EmpiricalNullCalibrator:
         warps_a = np.stack(warps)        # (K, H, W, 2)
         certs_a = np.stack(cert_maps)    # (K, H, W)
         var_map = CertWeightedStatistics.variance_per_pixel(warps_a, certs_a)
-        return {
+        result: dict = {
             "ivar": CertWeightedStatistics.interior_mean(var_map, interior_mask),
             "peak": CertWeightedStatistics.peak_max_z(var_map, interior_mask),
             "cert": CertWeightedStatistics.mean_cert_interior(certs_a, interior_mask),
             "var_map": var_map,
         }
 
+        # v9: Mahalanobis statistics (only if all refs returned precision matrices)
+        if len(precisions) == len(warps):
+            precisions_a = np.stack(precisions)  # (K, H, W, 2, 2)
+            D_map, logdetΛ_map, _ = MahalanobisStatistics.ivar_per_pixel(warps_a, precisions_a)
+            result["ivar_maha"] = MahalanobisStatistics.interior_mean(D_map, interior_mask)
+            result["evidence"] = MahalanobisStatistics.interior_mean(-logdetΛ_map, interior_mask)
+            result["D_map"] = D_map
+
+        return result
+
     # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _build_global(per_task: dict[str, TaskCalibration]) -> TaskCalibration:
-        """Pool ivar/peak/cert across all tasks → fallback distribution."""
+        """Pool ivar/peak/cert (and v9 maha fields) across all tasks → fallback distribution."""
         ivars = np.concatenate([tc.ivar_dist for tc in per_task.values()])
         peaks = np.concatenate([tc.peak_dist for tc in per_task.values()])
         certs = np.concatenate([tc.cert_dist for tc in per_task.values()])
+
+        # v9: pool maha distributions if any task has them
+        ivar_maha_parts = [
+            tc.ivar_maha_dist for tc in per_task.values() if tc.ivar_maha_dist is not None
+        ]
+        evidence_parts = [
+            tc.evidence_dist for tc in per_task.values() if tc.evidence_dist is not None
+        ]
+        ivar_maha_arr: Optional[np.ndarray] = None
+        evidence_arr: Optional[np.ndarray] = None
+        if ivar_maha_parts:
+            ivar_maha_arr = np.sort(np.concatenate(ivar_maha_parts))
+        if evidence_parts:
+            evidence_arr = np.sort(np.concatenate(evidence_parts))
+
         return TaskCalibration(
             task="__global__",
             n_refs=len(ivars),
@@ -308,6 +410,9 @@ class EmpiricalNullCalibrator:
             peak_dist=np.sort(peaks),
             cert_dist=np.sort(certs),
             per_pixel_var=None,
+            ivar_maha_dist=ivar_maha_arr,
+            evidence_dist=evidence_arr,
+            T_null=None,
         )
 
 

@@ -18,8 +18,9 @@ import torch.nn.functional as F
 
 
 class MatchResult(NamedTuple):
-    warp: np.ndarray  # (H, W, 2)  float32 in [-1, 1]
-    cert: np.ndarray  # (H, W)     float32 in [0, 1] (bg zeroed if mask given)
+    warp: np.ndarray       # (H, W, 2)  float32 in [-1, 1]
+    cert: np.ndarray       # (H, W)     float32 in [0, 1] (bg zeroed if mask given)
+    precision: Optional[np.ndarray] = None  # (H, W, 2, 2) float32, bg zeroed
 
 
 class RoMaMatcher:
@@ -110,7 +111,24 @@ class RoMaMatcher:
         if fg_mask is not None:
             cert_np[~fg_mask] = 0.0
 
-        return MatchResult(warp=warp_np, cert=cert_np)
+        # ── Extract full precision matrix (H, W, 2, 2) ───────────────────────
+        precision_np: Optional[np.ndarray] = None
+        raw_prec = preds.get("precision_AB")
+        if raw_prec is not None:
+            # raw_prec[0]: (H_orig, W_orig, 2, 2) tensor
+            prec_orig = raw_prec[0]  # (H, W, 2, 2)
+            H_orig, W_orig = prec_orig.shape[:2]
+            # Reshape to (1, 4, H, W) for bilinear interpolation
+            prec_flat = prec_orig.reshape(H_orig, W_orig, 4).permute(2, 0, 1).unsqueeze(0).float()
+            prec_r = F.interpolate(prec_flat, size=size, mode="bilinear", align_corners=False)
+            # prec_r: (1, 4, vis_size, vis_size) → (vis_size, vis_size, 2, 2)
+            precision_np = prec_r[0].permute(1, 2, 0).reshape(
+                self.vis_size, self.vis_size, 2, 2
+            ).cpu().numpy().astype(np.float32)
+            if fg_mask is not None:
+                precision_np[~fg_mask] = 0.0
+
+        return MatchResult(warp=warp_np, cert=cert_np, precision=precision_np)
 
     # ─────────────────────────────────────────────────────────────────────────
 

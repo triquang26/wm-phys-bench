@@ -22,7 +22,7 @@ from .fuser import SignalFuser
 from .mask import ForegroundMask, InteriorMask
 from .matcher import RoMaMatcher
 from .signals import Signal, per_pixel_p_value
-from .statistics import CertWeightedStatistics
+from .statistics import CertWeightedStatistics, MahalanobisStatistics
 
 
 @dataclass
@@ -64,6 +64,21 @@ class HallucinationResult:
             row[f"p_{name}"] = round(p, 6)
         for name, raw in self.raw_per_signal.items():
             row[f"raw_{name}"] = round(raw, 6)
+        # v9 maha columns (present only when precision matrices were available)
+        if "ivar_maha" in self.raw_per_signal:
+            row["raw_ivar_maha"] = round(self.raw_per_signal["ivar_maha"], 6)
+            row["p_ivar_maha"] = round(self.p_per_signal.get("ivar_maha", 1.0), 6)
+        if "evidence" in self.raw_per_signal:
+            row["raw_evidence"] = round(self.raw_per_signal["evidence"], 6)
+            row["p_evidence"] = round(self.p_per_signal.get("evidence", 1.0), 6)
+        # Maha-specific H_score if both maha signals present
+        if "ivar_maha" in self.p_per_signal and "evidence" in self.p_per_signal:
+            from .fuser import CauchyFuser
+            maha_p = CauchyFuser().fuse({
+                k: v for k, v in self.p_per_signal.items()
+                if k in ("ivar_maha", "evidence")
+            })
+            row["H_score_maha"] = round(1.0 - maha_p, 6)
         return row
 
 
@@ -112,7 +127,7 @@ class WarpVarianceDetector:
         img_bgr, fg_mask, interior_mask = self._load_query(query_path)
 
         # ── Match against refs ────────────────────────────────────────────
-        warps, certs, ok_refs = self._match_all(query_path, refs, fg_mask)
+        warps, certs, precisions, ok_refs = self._match_all(query_path, refs, fg_mask)
         if not warps:
             raise RuntimeError(
                 f"All {len(refs)} refs failed to match for {query_path} "
@@ -124,11 +139,19 @@ class WarpVarianceDetector:
 
         # ── Compute raw signals ───────────────────────────────────────────
         var_map = CertWeightedStatistics.variance_per_pixel(warps_a, certs_a)
-        raw = {
+        raw: dict[str, float] = {
             "ivar": CertWeightedStatistics.interior_mean(var_map, interior_mask),
             "peak": CertWeightedStatistics.peak_max_z(var_map, interior_mask),
             "cert": CertWeightedStatistics.mean_cert_interior(certs_a, interior_mask),
         }
+
+        # v9: Mahalanobis signals (only when all refs have precision matrices)
+        D_map: Optional[np.ndarray] = None
+        if precisions and len(precisions) == len(warps):
+            precisions_a = np.stack(precisions)  # (K, H, W, 2, 2)
+            D_map, logdetΛ_map, _ = MahalanobisStatistics.ivar_per_pixel(warps_a, precisions_a)
+            raw["ivar_maha"] = MahalanobisStatistics.interior_mean(D_map, interior_mask)
+            raw["evidence"] = MahalanobisStatistics.interior_mean(-logdetΛ_map, interior_mask)
 
         # ── Empirical p-values via signals ────────────────────────────────
         p_per_signal: dict[str, float] = {}
@@ -141,7 +164,7 @@ class WarpVarianceDetector:
         is_h = H_score > self.config.decision_threshold
 
         # ── Per-pixel heatmap (optional) ──────────────────────────────────
-        heatmap = self._compute_heatmap(var_map, interior_mask, task_calib)
+        heatmap = self._compute_heatmap(var_map, interior_mask, task_calib, D_map=D_map)
 
         return HallucinationResult(
             task=task,
@@ -194,9 +217,10 @@ class WarpVarianceDetector:
 
     def _match_all(
         self, query_path: Path, refs: list[Path], fg_mask: np.ndarray,
-    ) -> tuple[list[np.ndarray], list[np.ndarray], list[Path]]:
+    ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[Path]]:
         warps: list[np.ndarray] = []
         certs: list[np.ndarray] = []
+        precisions: list[np.ndarray] = []
         ok_refs: list[Path] = []
         n_failed = 0
         for ref_path in refs:
@@ -204,6 +228,8 @@ class WarpVarianceDetector:
                 m = self.matcher.match(query_path, ref_path, fg_mask=fg_mask)
                 warps.append(m.warp)
                 certs.append(m.cert)
+                if m.precision is not None:
+                    precisions.append(m.precision)
                 ok_refs.append(ref_path)
             except Exception as e:
                 n_failed += 1
@@ -213,16 +239,21 @@ class WarpVarianceDetector:
                 f"[detect] {len(ok_refs)}/{len(refs)} refs matched successfully "
                 f"({n_failed} failed) for {query_path.name}"
             )
-        return warps, certs, ok_refs
+        return warps, certs, precisions, ok_refs
 
     def _compute_heatmap(
         self,
         var_map: np.ndarray,
         interior_mask: np.ndarray,
         task_calib: TaskCalibration,
+        D_map: Optional[np.ndarray] = None,
     ) -> Optional[np.ndarray]:
         if not self.config.save_heatmaps:
             return None
+        # v9: prefer D_map-based per-pixel calibration when available
+        if D_map is not None and task_calib.T_null is not None:
+            p_map = per_pixel_p_value(D_map, task_calib.T_null, interior_mask)
+            return (1.0 - p_map).astype(np.float32) * interior_mask.astype(np.float32)
         if task_calib.per_pixel_var is None:
             # Fallback: within-frame z normalized via sigmoid as a "heatmap proxy"
             z = CertWeightedStatistics.within_frame_zscore(var_map, interior_mask)
