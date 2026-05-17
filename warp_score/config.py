@@ -17,8 +17,9 @@ _DATA_DIR = _REPO_ROOT / "data"
 class WarpScoreConfig:
     # ── Paths ──────────────────────────────────────────────────────────────
     root_dir: Path = field(default_factory=lambda: _REPO_ROOT)
-    high_dir: Path = field(default_factory=lambda: _DATA_DIR / "image_no_bg" / "high")
-    low_dir: Path = field(default_factory=lambda: _DATA_DIR / "image_no_bg" / "low")
+    reference_dir: Path = field(default_factory=lambda: _DATA_DIR / "reference")
+    query_high_dir: Path = field(default_factory=lambda: _DATA_DIR / "query" / "high")
+    query_low_dir: Path = field(default_factory=lambda: _DATA_DIR / "query" / "low")
     artifacts_dir: Path = field(default_factory=lambda: _REPO_ROOT / "artifacts" / "v9_dreamgen")
 
     # ── RoMaV2 ─────────────────────────────────────────────────────────────
@@ -57,8 +58,9 @@ class WarpScoreConfig:
 
     def __post_init__(self) -> None:
         self.root_dir = Path(self.root_dir)
-        self.high_dir = Path(self.high_dir)
-        self.low_dir = Path(self.low_dir)
+        self.reference_dir = Path(self.reference_dir)
+        self.query_high_dir = Path(self.query_high_dir)
+        self.query_low_dir = Path(self.query_low_dir)
         self.artifacts_dir = Path(self.artifacts_dir)
         self.calib_path = self.artifacts_dir / "calibration.npz"
         self.summary_csv = self.artifacts_dir / "summary.csv"
@@ -83,7 +85,7 @@ class WarpScoreConfig:
         valid = {f.name for f in fields(cls) if f.init}
         filtered = {k: v for k, v in data.items() if k in valid}
         # Convert string paths to Path
-        for k in ("root_dir", "high_dir", "low_dir", "artifacts_dir"):
+        for k in ("root_dir", "reference_dir", "query_high_dir", "query_low_dir", "artifacts_dir"):
             if k in filtered:
                 filtered[k] = Path(filtered[k])
         # signal_names: list → tuple

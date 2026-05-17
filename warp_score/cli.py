@@ -1,7 +1,7 @@
 """CLI for warp_score.
 
 Subcommands:
-    calibrate    Build per-task empirical null distributions from high/ refs.
+    calibrate    Build per-task empirical null distributions from reference/ refs.
     detect       Run detection on a query frame or directory.
     eval         Compute AUROC/AP/FPR@TPR from labels CSV + predictions CSV.
 """
@@ -50,9 +50,13 @@ def calibrate_cmd(args: argparse.Namespace) -> None:
     cfg = _load_config(args)
     logger = _setup_logger(cfg.run_log)
     logger.info("=== Calibrate ===")
-    logger.info(f"high_dir={cfg.high_dir}  artifacts={cfg.artifacts_dir}")
+    logger.info(f"reference_dir={cfg.reference_dir}  artifacts={cfg.artifacts_dir}")
 
-    high_refs = _discover_refs_by_task(cfg.high_dir)
+    high_refs = _discover_refs_by_task(cfg.reference_dir)
+    if getattr(args, "task", None):
+        high_refs = {k: v for k, v in high_refs.items() if k == args.task}
+        if not high_refs:
+            raise RuntimeError(f"Task '{args.task}' not found under {cfg.reference_dir}")
     logger.info(
         f"Found {sum(len(v) for v in high_refs.values())} refs across {len(high_refs)} tasks"
     )
@@ -71,7 +75,8 @@ def calibrate_cmd(args: argparse.Namespace) -> None:
     )
 
     artifact = calibrator.calibrate(high_refs)
-    artifact.save(cfg.calib_path)
+    out_path = Path(args.out) if getattr(args, "out", None) else cfg.calib_path
+    artifact.save(out_path)
     logger.info("Done.")
 
 
@@ -104,13 +109,25 @@ def detect_cmd(args: argparse.Namespace) -> None:
     plotter = HeatmapPlotter(vis_size=cfg.vis_size) if cfg.save_heatmaps else None
 
     # Resolve query list
+    task_filter = getattr(args, "task", None)
     if args.query:
         queries = [Path(args.query)]
     elif args.query_dir:
         queries = sorted(Path(args.query_dir).glob("**/*.png"))
+    elif task_filter:
+        high_task_dir = cfg.query_high_dir / task_filter
+        low_task_dir = cfg.query_low_dir / task_filter
+        if not high_task_dir.exists() and not low_task_dir.exists():
+            raise RuntimeError(
+                f"Task dir not found under either {cfg.query_high_dir} or {cfg.query_low_dir}: {task_filter}"
+            )
+        queries = sorted(high_task_dir.glob("*.png")) + sorted(low_task_dir.glob("*.png"))
     else:
-        # Default: scan low_dir
-        queries = sorted(cfg.low_dir.glob("**/*.png"))
+        # Default: scan BOTH query/high and query/low so a single run covers AUROC.
+        queries = (
+            sorted(cfg.query_high_dir.glob("**/*.png"))
+            + sorted(cfg.query_low_dir.glob("**/*.png"))
+        )
     if not queries:
         raise RuntimeError("No queries found.")
     logger.info(f"Processing {len(queries)} queries → {cfg.summary_csv}")
@@ -127,6 +144,15 @@ def detect_cmd(args: argparse.Namespace) -> None:
             except Exception as e:
                 logger.error(f"detect failed: {e}")
                 continue
+
+            # Infer split from path: query/high → "high", query/low → "low".
+            qstr = str(qpath).replace("\\", "/")
+            if "query/high" in qstr:
+                result.split = "high"
+            elif "query/low" in qstr:
+                result.split = "low"
+            else:
+                result.split = ""
 
             row = result.to_csv_row()
             if writer is None:
@@ -178,8 +204,9 @@ def _load_config(args: argparse.Namespace) -> WarpScoreConfig:
         cfg = WarpScoreConfig()
     # CLI overrides
     cfg = cfg.merge(
-        high_dir=Path(args.high_dir) if getattr(args, "high_dir", None) else None,
-        low_dir=Path(args.low_dir) if getattr(args, "low_dir", None) else None,
+        reference_dir=Path(args.ref_dir) if getattr(args, "ref_dir", None) else None,
+        query_high_dir=Path(args.query_high_dir) if getattr(args, "query_high_dir", None) else None,
+        query_low_dir=Path(args.query_low_dir) if getattr(args, "query_low_dir", None) else None,
         artifacts_dir=Path(args.artifacts_dir) if getattr(args, "artifacts_dir", None) else None,
         device=getattr(args, "device", None),
         setting=getattr(args, "setting", None),
@@ -195,18 +222,25 @@ def main(argv: list[str] | None = None) -> None:
         "--config", default=None,
         help="YAML config (default: warp_score/configs/default.yaml)",
     )
-    parser.add_argument("--high_dir", default=None)
-    parser.add_argument("--low_dir", default=None)
+    parser.add_argument("--ref_dir", default=None,
+                        help="Calibration reference dir (default: <repo>/data/reference)")
+    parser.add_argument("--query_high_dir", default=None,
+                        help="Clean held-out query dir, label=0 (default: <repo>/data/query/high)")
+    parser.add_argument("--query_low_dir", default=None,
+                        help="Hallucinated query dir, label=1 (default: <repo>/data/query/low)")
     parser.add_argument("--artifacts_dir", default=None)
     parser.add_argument("--device", default=None)
     parser.add_argument("--setting", default=None)
 
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("calibrate", help="Build per-task empirical null distributions")
+    cal = sub.add_parser("calibrate", help="Build per-task empirical null distributions")
+    cal.add_argument("--task", default=None, help="Only calibrate this one task (exact dir name)")
+    cal.add_argument("--out", default=None, help="Output .npz path (default: artifacts_dir/calibration.npz)")
 
     det = sub.add_parser("detect", help="Run detection on a query/dir")
     det.add_argument("--query", default=None, help="Single PNG path")
-    det.add_argument("--query_dir", default=None, help="Dir of PNGs (overrides low_dir)")
+    det.add_argument("--query_dir", default=None, help="Dir of PNGs (overrides query_high_dir / query_low_dir)")
+    det.add_argument("--task", default=None, help="Detect only this task's frames (under both query/high and query/low)")
 
     ev = sub.add_parser("eval", help="Compute AUROC/AP from labels + preds CSV")
     ev.add_argument("--labels", required=True)

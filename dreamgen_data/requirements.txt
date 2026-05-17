@@ -1,11 +1,8 @@
-# Extra deps used by prepare_data.py, generate.py, postprocess.py.
-# cosmos-predict2 itself + its torch/diffusers stack is installed by setup.sh
-# via Nvidia's extra-index-url. Versions below are pinned for reproducibility;
-# loosen them only after verifying with `pip check`.
+# Extra deps wrapping cosmos-predict2. cosmos-predict2 itself + its torch stack
+# is installed by setup.sh via Nvidia's extra-index-url, so it is NOT pinned here.
+# Pinned for reproducibility; loosen only after `pip check` confirms compat.
 datasets==3.0.2
 huggingface_hub==0.26.1
 opencv-python-headless==4.10.0.84
 pillow==10.4.0
 tqdm==4.66.5
-numpy>=1.26,<2.0
-

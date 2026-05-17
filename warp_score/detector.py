@@ -37,6 +37,7 @@ class HallucinationResult:
     raw_per_signal: dict[str, float]
     heatmap: Optional[np.ndarray] = None      # (H, W) ∈ [0, 1]; None if disabled
     auto_detected_task: str = ""
+    split: str = ""  # "high" or "low" depending on which query/ subtree the frame came from
 
     # Diagnostics (kept for backward-compat CSV columns)
     interior_mean_var: float = 0.0
@@ -48,6 +49,7 @@ class HallucinationResult:
         row = {
             "task": self.task,
             "frame": self.frame,
+            "split": self.split,
             "n_refs": self.n_refs,
             "H_score": round(self.H_score, 6),
             "is_hallucination": int(self.is_hallucination),
@@ -97,7 +99,7 @@ class WarpVarianceDetector:
         task: if provided, must be a key in calibration. Otherwise inferred from
               parent directory name.
         refs: explicit ref paths; defaults to ones discovered from
-              config.high_dir / <task> / *.png.
+              config.reference_dir / <task> / *.png.
         """
         query_path = Path(query_path)
         task = task or query_path.parent.name
@@ -166,7 +168,7 @@ class WarpVarianceDetector:
         return self.calib.global_
 
     def _discover_refs(self, task: str) -> list[Path]:
-        task_dir = self.config.high_dir / task
+        task_dir = self.config.reference_dir / task
         if not task_dir.exists():
             return []
         return sorted(task_dir.glob("*.png"))

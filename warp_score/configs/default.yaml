@@ -6,12 +6,14 @@
 # Or copy this file as a new YAML and edit there (one YAML per experiment).
 
 # Paths — defaults are repo-relative (inferred from package location at runtime):
-#   high_dir:      <repo>/data/image_no_bg/high
-#   low_dir:       <repo>/data/image_no_bg/low
-#   artifacts_dir: <repo>/artifacts/v9_dreamgen
+#   reference_dir:  <repo>/data/reference            (calibration refs, LOO)
+#   query_high_dir: <repo>/data/query/high           (clean held-out queries, AUROC label=0)
+#   query_low_dir:  <repo>/data/query/low            (hallucinated queries, AUROC label=1)
+#   artifacts_dir:  <repo>/artifacts/v9_dreamgen
 # Uncomment and set these only if your data lives elsewhere:
-# high_dir:       /absolute/path/to/image_no_bg/high
-# low_dir:        /absolute/path/to/image_no_bg/low
+# reference_dir:  /absolute/path/to/reference
+# query_high_dir: /absolute/path/to/query/high
+# query_low_dir:  /absolute/path/to/query/low
 # artifacts_dir:  /absolute/path/to/artifacts
 
 # RoMaV2

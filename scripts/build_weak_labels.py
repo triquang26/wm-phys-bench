@@ -1,19 +1,18 @@
-"""Build labels.csv from harvested image_no_bg directories.
+"""Build labels.csv from harvested query directories.
 
-Scans high/<task>/*.png  → label=0  (clean reference)
-Scans low/<task>/*.png   → label=1  (potentially hallucinated)
+Scans query_high_dir/<task>/*.png  → label=0  (clean held-out query)
+Scans query_low_dir/<task>/*.png   → label=1  (potentially hallucinated)
 
 Output CSV columns:
-    frame  : relative path from repo root
-             e.g. ../image_no_bg/high/0_Open_the_box/frame_0001.png
     task   : parent directory name (task identifier)
-    label  : 0 or 1
+    frame  : absolute path to the PNG
     split  : "high" or "low"
+    label  : 0 or 1
 
 Usage:
     python scripts/build_weak_labels.py \
-        --high_dir ../image_no_bg/high \
-        --low_dir  ../image_no_bg/low \
+        --query_high_dir data/query/high \
+        --query_low_dir  data/query/low \
         --out labels.csv
 """
 from __future__ import annotations
@@ -31,10 +30,10 @@ def collect(root: Path, label: int, split: str) -> list[dict]:
         task = png.parent.name
         rows.append(
             {
-                "frame": str(png),
                 "task": task,
-                "label": label,
+                "frame": str(png),
                 "split": split,
+                "label": label,
             }
         )
     return rows
@@ -42,17 +41,17 @@ def collect(root: Path, label: int, split: str) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build weak labels CSV from image_no_bg/{high,low} directories."
+        description="Build weak labels CSV from data/query/{high,low} directories."
     )
     parser.add_argument(
-        "--high_dir",
+        "--query_high_dir",
         required=True,
-        help="Path to image_no_bg/high (label=0, clean references)",
+        help="Path to data/query/high (label=0, clean held-out queries)",
     )
     parser.add_argument(
-        "--low_dir",
+        "--query_low_dir",
         required=True,
-        help="Path to image_no_bg/low (label=1, hallucination candidates)",
+        help="Path to data/query/low (label=1, hallucination candidates)",
     )
     parser.add_argument(
         "--out",
@@ -61,24 +60,29 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    high_dir = Path(args.high_dir)
-    low_dir = Path(args.low_dir)
+    query_high_dir = Path(args.query_high_dir)
+    query_low_dir = Path(args.query_low_dir)
     out_path = Path(args.out)
 
-    if not high_dir.exists():
-        print(f"ERROR: high_dir not found: {high_dir}", file=sys.stderr)
+    if not query_high_dir.exists():
+        print(f"ERROR: query_high_dir not found: {query_high_dir}", file=sys.stderr)
         sys.exit(1)
-    if not low_dir.exists():
-        print(f"ERROR: low_dir not found: {low_dir}", file=sys.stderr)
+    if not query_low_dir.exists():
+        print(f"ERROR: query_low_dir not found: {query_low_dir}", file=sys.stderr)
         sys.exit(1)
 
-    rows = collect(high_dir, label=0, split="high") + collect(low_dir, label=1, split="low")
+    rows = collect(query_high_dir, label=0, split="high") + collect(
+        query_low_dir, label=1, split="low"
+    )
 
     if not rows:
-        print("WARNING: no PNG files found under high_dir or low_dir.", file=sys.stderr)
+        print(
+            "WARNING: no PNG files found under query_high_dir or query_low_dir.",
+            file=sys.stderr,
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["frame", "task", "label", "split"]
+    fieldnames = ["task", "frame", "split", "label"]
     with open(out_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

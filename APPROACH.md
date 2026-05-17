@@ -17,12 +17,13 @@ Concretely, the dataset has:
 
 | Split | Quality | Description |
 |-------|---------|-------------|
-| `image_no_bg/high/` | Reference (clean) | Frames captured during genuine, successful robot execution. No hallucination by construction. |
-| `image_no_bg/low/` | Query (test) | Frames from a policy rollout. Some are correct; some are hallucinated. |
+| `data/reference/` | Reference (clean) | Frames captured during genuine, successful robot execution. No hallucination by construction. Used for LOO calibration. |
+| `data/query/high/` | Clean held-out query | Clean frames held out of calibration. Used as AUROC label=0. |
+| `data/query/low/`  | Hallucinated query | Frames from a policy rollout suspected to contain hallucinations. AUROC label=1. |
 
-Both splits are organized by **task** (directory name = task description string, e.g.
+All three subtrees are organized by **task** (directory name = task description string, e.g.
 `0_Open the box`, `4_Use the right hand to close waffle maker`, etc.).  
-Each task has exactly **6 high frames** and **6 low frames**.
+Each task has a small number of frames per subtree (historically 6 per split).
 
 The background has already been removed by SAM3: background pixels are exactly `(127, 127, 127)`.
 Only the robot arm and object pixels are meaningful.
@@ -75,7 +76,7 @@ weight.
    to separate fg from bg. Any change to the segmenter output format breaks this.
 
 2. **Tasks are the parent directory name** — `Path(frame).parent.name` is the task ID. Task names
-   must match exactly between `high/` and `low/` splits for task-specific calibration to work.
+   must match exactly across `reference/`, `query/high/`, and `query/low/` for task-specific calibration to work.
 
 3. **Each task has ≥ 2 high frames** — calibration requires at least one ref per query (so ≥ 2
    total). With 6 per task, each calibration query uses 5 refs.
@@ -342,7 +343,7 @@ PYTHONPATH=../../../RoMaV2/src:$PYTHONPATH \
 conda run -n groot --no-capture-output python warp_variance_vis.py \
   --calibrate --task_refs \
   --calib_file ../results/warp_variance_v8/calib_task_specific.json \
-  --high_dir ../image_no_bg/high \
+  --ref_dir data/reference \
   --setting turbo --use_precision --device cuda
 ```
 
@@ -351,7 +352,7 @@ conda run -n groot --no-capture-output python warp_variance_vis.py \
 ```bash
 PYTHONPATH=../../../RoMaV2/src:$PYTHONPATH \
 conda run -n groot --no-capture-output python warp_variance_vis.py \
-  --query_dir ../image_no_bg/low \
+  --query_dir data/query/low \
   --task_refs \
   --calib_file ../results/warp_variance_v8/calib_task_specific.json \
   --global_z_thresh 2.0 \
@@ -364,7 +365,7 @@ conda run -n groot --no-capture-output python warp_variance_vis.py \
 ```bash
 PYTHONPATH=../../../RoMaV2/src:$PYTHONPATH \
 conda run -n groot --no-capture-output python warp_variance_vis.py \
-  --query "../image_no_bg/low/0_Open the box/frame_0005.png" \
+  --query "data/query/low/0_Open the box/frame_0005.png" \
   --task_refs \
   --calib_file ../results/warp_variance_v8/calib_task_specific.json \
   --global_z_thresh 2.0 \

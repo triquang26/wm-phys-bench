@@ -46,8 +46,9 @@ def test_empirical_p_low_direction():
     dist = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
     # Value below all → only Laplace
     assert _empirical_p(-1.0, dist, "low") == pytest.approx(1 / 6)
-    # Value at max → all elements <= → (1+5)/6
-    assert _empirical_p(0.5, dist, "low") == pytest.approx(6 / 6)
+    # Value at max → all 5 elements <=, but cap at n-1=4 → (1+4)/6 = 5/6
+    # (cap prevents p=1.0 which would yield Z=-inf in Stouffer fusion)
+    assert _empirical_p(0.5, dist, "low") == pytest.approx(5 / 6)
 
 
 # ────────────────────────────────────────────────────────────────────────────

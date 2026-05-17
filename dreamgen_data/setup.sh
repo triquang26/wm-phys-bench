@@ -1,91 +1,224 @@
 #!/usr/bin/env bash
-# setup.sh — install cosmos-predict2 and download checkpoints for GR00T-Dreams-GR1.
-# Tested against cosmos-predict2 main branch (last verified release: Aug-Dec 2025).
+# setup.sh -- install cosmos-predict2 + download the GR00T-Dreams-GR1 checkpoint
+# (2B Video2World variant) used by the dreamgen pipeline.
 #
-# Requirements before running:
-#   - CUDA 12.6+, NVIDIA driver supporting Hopper or newer
-#   - Python 3.10
-#   - ~250 GB free disk for 14B GR1 + base ckpts (or ~50 GB if --only_2b)
-#   - HF token with access to Llama-Guard-3-8B (free, requires Meta T&C accept)
+# This is idempotent: each step short-circuits if its product already exists.
+# Logs everything to setup.log (in addition to stdout).
+#
+# REQUIREMENTS
+#   - NVIDIA GPU with driver compatible with CUDA 12.6 runtime
+#     (driver 535.x = CUDA 12.4 max -- wheels ship their own runtime so this works)
+#   - Linux x86-64, glibc >= 2.31
+#   - uv on PATH (auto-installed if missing)
+#   - ~120 GB free disk for full checkpoint family
+#   - HF_TOKEN env var with access to gated repos (Llama-Guard-3-8B):
 #       export HF_TOKEN=hf_xxx
 #
-# Optional env vars:
-#   COSMOS_DIR              override clone location
-#   ONLY_2B=1               skip 14B checkpoint download (saves ~200GB)
-#   ONLY_GR1=1              skip base checkpoint download
-#
-set -euo pipefail
+# NETWORK
+#   The cosmos-predict2 `[cu126]` install pulls torch/torchvision/flash-attn/
+#   transformer-engine/apex/natten from a custom Nvidia index hosted on
+#   `nvidia-cosmos.github.io` (GitHub Pages, 185.199.108-111.153).
+#   If that host is firewalled, fall back to:
+#     - torch / torchvision from https://download.pytorch.org/whl/cu126
+#     - flash-attn 2.6.3 prebuilt wheels (cu123, torch 2.4) from
+#       https://github.com/Dao-AILab/flash-attention/releases  -- which
+#       requires *downgrading* torch to 2.4. cosmos-predict2 pins torch==2.6.0,
+#       so that path needs a `--no-deps` install + manual override.
+#   See ENV.md for the current blocker.
+set -e
+set -o pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-COSMOS_DIR="${ROOT}/cosmos-predict2"
-CKPT_DIR="${COSMOS_DIR}/checkpoints"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# ---------------------------------------------------------------------------
-# 1. Clone cosmos-predict2 (engine of DreamGen / GR00T-Dreams)
-# ---------------------------------------------------------------------------
-if [ ! -d "${COSMOS_DIR}" ]; then
-    echo "[setup] cloning cosmos-predict2…"
-    git clone https://github.com/nvidia-cosmos/cosmos-predict2.git "${COSMOS_DIR}"
-else
-    echo "[setup] cosmos-predict2 already cloned, skipping"
-fi
-
-# ---------------------------------------------------------------------------
-# 2. Install via uv (recommended by Nvidia)
-# ---------------------------------------------------------------------------
-if ! command -v uv >/dev/null 2>&1; then
-    echo "[setup] installing uv…"
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    source "$HOME/.local/bin/env"
-fi
-
-cd "${COSMOS_DIR}"
-uv venv --python 3.10 --allow-existing
-# CUDA 12.6 + torch 2.6 wheels (adjust if your CUDA differs)
-uv pip install -U "cosmos-predict2[cu126]" \
-    --extra-index-url https://nvidia-cosmos.github.io/cosmos-dependencies/cu126_torch260/simple
-
-# Extra deps used by our wrapper scripts
-uv pip install -U "datasets>=3.0" "huggingface_hub[cli]" "opencv-python-headless" "pillow" "tqdm"
+# Tee everything to setup.log (overwrite per run, easier to scan)
+exec > >(tee setup.log) 2>&1
+echo "===== setup.sh start: $(date -Iseconds) ====="
 
 # ---------------------------------------------------------------------------
-# 3. HuggingFace auth (needed for Llama-Guard-3-8B guardrail)
+# 1. HF_TOKEN check
 # ---------------------------------------------------------------------------
 if [ -z "${HF_TOKEN:-}" ]; then
-    echo "[setup] WARNING: HF_TOKEN env var not set."
-    echo "[setup] Accept Llama-Guard-3-8B terms at"
-    echo "        https://huggingface.co/meta-llama/Llama-Guard-3-8B"
-    echo "        then: export HF_TOKEN=hf_xxx ; rerun setup.sh"
+    echo "ERROR: HF_TOKEN not set. Source ../.env.dreamgen first:"
+    echo "       set -a && source ../.env.dreamgen && set +a"
+    exit 1
 fi
-uv run huggingface-cli login --token "${HF_TOKEN:-}" --add-to-git-credential || true
+echo "[setup] HF_TOKEN: <set, first 6=${HF_TOKEN:0:6}>"
 
 # ---------------------------------------------------------------------------
-# 4. Download checkpoints
-#    - Cosmos-Predict2-14B-Video2World          (base — used for `hallucinate` profile)
-#    - Cosmos-Predict2-14B-Sample-GR00T-Dreams-GR1 (post-trained — used for `high` profile)
-#    Resolution 480p / 16fps because that's what the GR1 sample checkpoint supports.
+# 2. Ensure uv is installed
 # ---------------------------------------------------------------------------
-mkdir -p "${CKPT_DIR}"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "[setup] uv not found, installing..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    # shellcheck disable=SC1091
+    source "$HOME/.local/bin/env" 2>/dev/null || export PATH="$HOME/.local/bin:$PATH"
+fi
+echo "[setup] uv: $(command -v uv) $(uv --version)"
 
-# Default: 2B (single-GPU friendly, ~50GB). Set USE_14B=1 to download full 14B (~250GB).
-MODEL_TYPES=()
-if [ -n "${USE_14B:-}" ]; then
-    MODEL_TYPES+=(video2world sample_gr00t_dreams_gr1)
-    MODEL_SIZE="14B"
-    echo "[setup] downloading 14B GR1 + base ckpts (~250GB) — set unset USE_14B for 2B only"
+# ---------------------------------------------------------------------------
+# 3. Clone cosmos-predict2 (skip if exists)
+# ---------------------------------------------------------------------------
+if [ ! -d cosmos-predict2 ]; then
+    echo "[setup] cloning cosmos-predict2..."
+    git clone --depth 1 https://github.com/nvidia-cosmos/cosmos-predict2.git
 else
-    MODEL_TYPES+=(video2world)
-    MODEL_SIZE="2B"
-    echo "[setup] downloading 2B base ckpt only (~50GB). Set USE_14B=1 for full quality."
+    echo "[setup] cosmos-predict2 already cloned, skipping clone"
+fi
+COSMOS_SHA=$(git -C cosmos-predict2 rev-parse HEAD)
+echo "$COSMOS_SHA" > _cosmos_sha.txt
+echo "[setup] cosmos-predict2 SHA: $COSMOS_SHA"
+
+# ---------------------------------------------------------------------------
+# 4. Create venv with uv (Python 3.11; cosmos-predict2 supports 3.10/3.11)
+# ---------------------------------------------------------------------------
+VENV_DIR="cosmos-predict2/.venv"
+VENV_PY="$VENV_DIR/bin/python"
+if [ ! -f "$VENV_PY" ] || ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    echo "[setup] creating uv venv (python 3.11, seeded with pip)..."
+    # --seed installs pip/setuptools/wheel into the venv so the venv-local pip
+    # is available; without it, modern uv venvs are pip-less.
+    rm -rf "$VENV_DIR"
+    uv venv "$VENV_DIR" --python 3.11 --seed
+else
+    echo "[setup] venv already exists at $VENV_DIR (pip OK)"
+fi
+PIP=("$VENV_PY" -m pip)
+
+# ---------------------------------------------------------------------------
+# 5. Install wrapper requirements (HF hub + opencv + datasets)
+# ---------------------------------------------------------------------------
+echo "[setup] installing wrapper requirements..."
+"${PIP[@]}" install --upgrade pip
+"${PIP[@]}" install -r requirements.txt
+
+# ---------------------------------------------------------------------------
+# 6. Install cosmos-predict2 + its CUDA stack.
+#    Primary path (uses Nvidia's cu126 wheel index):
+# ---------------------------------------------------------------------------
+COSMOS_INDEX="https://nvidia-cosmos.github.io/cosmos-dependencies/cu126_torch260/simple"
+echo "[setup] testing reachability of $COSMOS_INDEX ..."
+if "$VENV_PY" - <<'PY' >/dev/null 2>&1
+import urllib.request
+urllib.request.urlopen(
+    "https://nvidia-cosmos.github.io/cosmos-dependencies/cu126_torch260/simple/cosmos-predict2/",
+    timeout=15,
+)
+PY
+then
+    echo "[setup] cosmos-cu126 index reachable -- using primary install path"
+    "${PIP[@]}" install -U "cosmos-predict2[cu126]==1.0.9" \
+        --extra-index-url "$COSMOS_INDEX"
+else
+    echo "[setup] WARN: cosmos-cu126 index NOT reachable from this host."
+    echo "       (Likely firewalled GitHub-Pages range 185.199.108-111.153)"
+    echo "       Falling back to pytorch.org + PyPI install (no flash-attn/apex/natten)."
+    echo "       Inference WILL still attempt to run but performance / numerics"
+    echo "       may differ from the reference setup."
+
+    # 6a. Install torch+cu126 from pytorch.org
+    "${PIP[@]}" install \
+        --index-url https://download.pytorch.org/whl/cu126 \
+        --extra-index-url https://pypi.org/simple \
+        "torch==2.6.0" "torchvision==0.21.0"
+
+    # 6b. Install cosmos-predict2 itself + its python-only deps from PyPI.
+    #     Skip the [cu126] extra (those deps live only on the unreachable index).
+    "${PIP[@]}" install "cosmos-predict2==1.0.9" \
+        --extra-index-url https://pypi.org/simple
+
+    # 6c. Optional flash-attn from PyPI (will compile from sdist -- slow, needs
+    #     matching nvcc; will likely fail without CUDA 12.6 toolkit). Skipped
+    #     unless caller sets COSMOS_BUILD_FLASHATTN=1.
+    if [ "${COSMOS_BUILD_FLASHATTN:-0}" = "1" ]; then
+        echo "[setup] building flash-attn 2.6.3 from source (slow)..."
+        "${PIP[@]}" install --no-build-isolation flash-attn==2.6.3 || \
+            echo "[setup] WARN: flash-attn build failed; continuing without it"
+    fi
 fi
 
-uv run python -m scripts.download_checkpoints \
-    --model_types "${MODEL_TYPES[@]}" \
-    --model_sizes "${MODEL_SIZE}" \
-    --resolution 480 \
-    --fps 16
+# Editable install of the clone so generate.py picks up `imaginaire.utils.io`
+# and any in-repo modules.
+"${PIP[@]}" install --no-deps -e cosmos-predict2/ || \
+    echo "[setup] WARN: editable install of cosmos-predict2/ failed (continuing)"
 
-echo "[setup] done."
-echo "[setup] cosmos-predict2 lives at: ${COSMOS_DIR}"
-echo "[setup] activate env with: cd ${COSMOS_DIR} && source .venv/bin/activate"
-echo "[setup] next: cd .. && python prepare_data.py --out_dir data --max_items 100"
+# ---------------------------------------------------------------------------
+# 7. HuggingFace login (writes ~/.cache/huggingface/token)
+# ---------------------------------------------------------------------------
+HFCLI="$VENV_DIR/bin/huggingface-cli"
+if [ -x "$HFCLI" ]; then
+    echo "[setup] logging in to HuggingFace..."
+    "$HFCLI" login --token "$HF_TOKEN" --add-to-git-credential || true
+else
+    echo "[setup] WARN: huggingface-cli not found at $HFCLI -- using HF_TOKEN env var only"
+fi
+
+# ---------------------------------------------------------------------------
+# 8. Download checkpoints.
+#    cosmos-predict2 expects: $PWD/checkpoints/{org}/{repo}/...
+#    For Video2World-2B inference we need:
+#      - nvidia/Cosmos-Predict2-2B-Video2World    (the DiT, ~50 GB)
+#      - google-t5/t5-11b                         (text encoder, ~45 GB)
+#      - nvidia/Cosmos-Guardrail1                 (guardrail, ~5 GB)        [optional if disable_guardrail]
+#      - meta-llama/Llama-Guard-3-8B              (~16 GB, gated)           [only with guardrail]
+#      - nvidia/Cosmos-Reason1-7B                 (~15 GB, prompt refiner)  [optional if disable_prompt_refiner]
+#
+#    We download via huggingface_hub.snapshot_download (always reachable on
+#    this host) and pin the revision recorded by cosmos-predict2 upstream.
+# ---------------------------------------------------------------------------
+mkdir -p checkpoints
+echo "[setup] downloading checkpoints..."
+"$VENV_PY" - <<'PY'
+import os
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+# Pinned revisions copied from cosmos-predict2 scripts/download_checkpoints.py
+PINS = {
+    "nvidia/Cosmos-Predict2-2B-Video2World": "f50c09f5d8ab133a90cac3f4886a6471e9ba3f18",
+    "google-t5/t5-11b":                      "90f37703b3334dfe9d2b009bfcbfbf1ac9d28ea3",
+    "nvidia/Cosmos-Guardrail1":              "d6d4bfa899a71454a700907664f3e88f503950cf",
+}
+# (Llama-Guard-3-8B and Cosmos-Reason1-7B are heavy and only needed when
+# guardrail / prompt refiner are enabled. We disable both in profiles.py.)
+
+root = Path("checkpoints").resolve()
+for repo_id, rev in PINS.items():
+    out = root / repo_id  # nested {org}/{repo}/ matches CHECKPOINTS_DIR expectation
+    if (out / "config.json").exists() or any(out.glob("*.safetensors")) or any(out.glob("*.pt")):
+        print(f"[ckpt] skip (exists): {repo_id}")
+        continue
+    out.mkdir(parents=True, exist_ok=True)
+    print(f"[ckpt] downloading {repo_id}@{rev[:8]} -> {out}")
+    snapshot_download(
+        repo_id=repo_id,
+        revision=rev,
+        local_dir=str(out),
+        max_workers=4,
+    )
+    print(f"[ckpt] done: {repo_id}")
+
+# Record the headline revision for reproducibility
+Path("_ckpt_revision.txt").write_text(PINS["nvidia/Cosmos-Predict2-2B-Video2World"])
+print("[ckpt] all done")
+PY
+
+# ---------------------------------------------------------------------------
+# 9. Sanity import
+#    Verified path: cosmos_predict2.pipelines.video2world.Video2WorldPipeline
+#    (Confirmed by reading cosmos-predict2/cosmos_predict2/pipelines/video2world.py:255)
+# ---------------------------------------------------------------------------
+echo "[setup] sanity-checking cosmos-predict2 import..."
+"$VENV_PY" -c "
+from cosmos_predict2.pipelines.video2world import Video2WorldPipeline
+from cosmos_predict2.configs.base.config_video2world import get_cosmos_predict2_video2world_pipeline
+from imaginaire.utils.io import save_image_or_video
+print('cosmos-predict2 OK -- Video2WorldPipeline / save_image_or_video importable')
+" || {
+    echo "[setup] WARN: sanity import failed."
+    echo "       Look in cosmos-predict2/cosmos_predict2/pipelines/ for the real layout"
+    echo "       and update generate.py:_import_cosmos()."
+}
+
+echo "===== setup.sh done: $(date -Iseconds) ====="
+echo "Setup complete. HF_TOKEN: <set>. Cosmos SHA: $COSMOS_SHA"

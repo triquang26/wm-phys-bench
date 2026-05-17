@@ -101,7 +101,7 @@ def _empirical_p(value: float, dist_sorted: np.ndarray, direction: str) -> float
         k = int(np.searchsorted(dist_sorted, value, side="right"))
     else:
         raise ValueError(f"Unknown direction '{direction}'")
-    return (1 + k) / (n + 1)
+    return (1 + min(k, n - 1)) / (n + 1)
 
 
 def per_pixel_p_value(
@@ -133,7 +133,7 @@ def per_pixel_p_value(
     # We use side='left' semantics: # of values >= v = N - argfirst(v in sorted asc)
     # Simpler: use rank via sum of boolean
     ge = (interior_dist >= interior_var[None, :])
-    k = ge.sum(axis=0)
+    k = np.minimum(ge.sum(axis=0), n - 1)
     p_interior = (1 + k) / (n + 1)
     p[ys, xs] = p_interior.astype(np.float32)
     return p

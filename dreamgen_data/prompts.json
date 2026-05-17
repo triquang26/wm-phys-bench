@@ -1,0 +1,94 @@
+[
+  {
+    "task": "0_Open the box",
+    "prompt": "Open the box"
+  },
+  {
+    "task": "0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.",
+    "prompt": "Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl."
+  },
+  {
+    "task": "10_Use the right hand to pick up yellow star fruit from right side of table to white shelf.",
+    "prompt": "Use the right hand to pick up yellow star fruit from right side of table to white shelf."
+  },
+  {
+    "task": "11_Use the right hand to pick up cup to green trash can",
+    "prompt": "Use the right hand to pick up cup to green trash can"
+  },
+  {
+    "task": "11_Use the right hand to pick up green pepper from black shelf to inside brown paper bag.",
+    "prompt": "Use the right hand to pick up green pepper from black shelf to inside brown paper bag."
+  },
+  {
+    "task": "12_Use the right hand to pick up orange to metal platform",
+    "prompt": "Use the right hand to pick up orange to metal platform"
+  },
+  {
+    "task": "13_Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack.",
+    "prompt": "Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack."
+  },
+  {
+    "task": "14_Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf.",
+    "prompt": "Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf."
+  },
+  {
+    "task": "15_Use the left hand to pick up red glass from light red plate to turquoise plate.",
+    "prompt": "Use the left hand to pick up red glass from light red plate to turquoise plate."
+  },
+  {
+    "task": "16_Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate.",
+    "prompt": "Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate."
+  },
+  {
+    "task": "17_Use the right hand to pick up orange from pink plate to pale turquoise plate.",
+    "prompt": "Use the right hand to pick up orange from pink plate to pale turquoise plate."
+  },
+  {
+    "task": "19_Use the right hand to pick up sandwich to pizza box",
+    "prompt": "Use the right hand to pick up sandwich to pizza box"
+  },
+  {
+    "task": "1_Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl.",
+    "prompt": "Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl."
+  },
+  {
+    "task": "20_Use the right hand to pick up pink peach from center of white table to bottom level of the shelf.",
+    "prompt": "Use the right hand to pick up pink peach from center of white table to bottom level of the shelf."
+  },
+  {
+    "task": "28_Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls",
+    "prompt": "Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls"
+  },
+  {
+    "task": "2_Use the right hand to close the black drawer",
+    "prompt": "Use the right hand to close the black drawer"
+  },
+  {
+    "task": "2_Use the right hand to pick up tall red glass from center of table to center of bright blue plate.",
+    "prompt": "Use the right hand to pick up tall red glass from center of table to center of bright blue plate."
+  },
+  {
+    "task": "3_Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket.",
+    "prompt": "Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket."
+  },
+  {
+    "task": "4_Use the right hand to close waffle maker",
+    "prompt": "Use the right hand to close waffle maker"
+  },
+  {
+    "task": "5_Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag.",
+    "prompt": "Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag."
+  },
+  {
+    "task": "6_Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table.",
+    "prompt": "Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table."
+  },
+  {
+    "task": "8_Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf.",
+    "prompt": "Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf."
+  },
+  {
+    "task": "9_Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate.",
+    "prompt": "Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate."
+  }
+]

@@ -1,0 +1,139 @@
+image_id,task,frame,split,is_hallucination,score,score_patchcore,score_graph
+0_Open_the_box__frame_0001,0_Open the box,frame_0001,low,False,0.5231,0.7375,0.3087
+0_Open_the_box__frame_0002,0_Open the box,frame_0002,low,True,0.5020,1.0000,0.0041
+0_Open_the_box__frame_0003,0_Open the box,frame_0003,low,True,0.5240,1.0000,0.0481
+0_Open_the_box__frame_0004,0_Open the box,frame_0004,low,True,0.8291,1.0000,0.6582
+0_Open_the_box__frame_0005,0_Open the box,frame_0005,low,True,0.8331,1.0000,0.6661
+0_Open_the_box__frame_0006,0_Open the box,frame_0006,low,True,0.8402,1.0000,0.6803
+0_Use_the_left_hand_to_pick_up_dark_green_cucumber_from__frame_0001,0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.,frame_0001,low,True,0.4375,0.8747,0.0003
+0_Use_the_left_hand_to_pick_up_dark_green_cucumber_from__frame_0002,0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.,frame_0002,low,True,0.6579,1.0000,0.3158
+0_Use_the_left_hand_to_pick_up_dark_green_cucumber_from__frame_0003,0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.,frame_0003,low,True,0.8272,1.0000,0.6544
+0_Use_the_left_hand_to_pick_up_dark_green_cucumber_from__frame_0004,0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.,frame_0004,low,True,0.6894,1.0000,0.3787
+0_Use_the_left_hand_to_pick_up_dark_green_cucumber_from__frame_0005,0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.,frame_0005,low,True,0.8129,1.0000,0.6259
+0_Use_the_left_hand_to_pick_up_dark_green_cucumber_from__frame_0006,0_Use the left hand to pick up dark green cucumber from on circular gray mat to above beige bowl.,frame_0006,low,True,0.8086,1.0000,0.6172
+10_Use_the_right_hand_to_pick_up_yellow_star_fruit_from__frame_0001,10_Use the right hand to pick up yellow star fruit from right side of table to white shelf.,frame_0001,low,False,0.3287,0.4283,0.2291
+10_Use_the_right_hand_to_pick_up_yellow_star_fruit_from__frame_0002,10_Use the right hand to pick up yellow star fruit from right side of table to white shelf.,frame_0002,low,True,0.8581,0.9272,0.7891
+10_Use_the_right_hand_to_pick_up_yellow_star_fruit_from__frame_0003,10_Use the right hand to pick up yellow star fruit from right side of table to white shelf.,frame_0003,low,True,0.7632,0.9255,0.6009
+10_Use_the_right_hand_to_pick_up_yellow_star_fruit_from__frame_0004,10_Use the right hand to pick up yellow star fruit from right side of table to white shelf.,frame_0004,low,True,0.8880,1.0000,0.7761
+10_Use_the_right_hand_to_pick_up_yellow_star_fruit_from__frame_0005,10_Use the right hand to pick up yellow star fruit from right side of table to white shelf.,frame_0005,low,True,0.7174,1.0000,0.4349
+10_Use_the_right_hand_to_pick_up_yellow_star_fruit_from__frame_0006,10_Use the right hand to pick up yellow star fruit from right side of table to white shelf.,frame_0006,low,True,0.9147,1.0000,0.8294
+11_Use_the_right_hand_to_pick_up_cup_to_green_trash_can__frame_0001,11_Use the right hand to pick up cup to green trash can,frame_0001,low,True,0.8798,0.9830,0.7767
+11_Use_the_right_hand_to_pick_up_cup_to_green_trash_can__frame_0002,11_Use the right hand to pick up cup to green trash can,frame_0002,low,True,0.9029,0.9715,0.8344
+11_Use_the_right_hand_to_pick_up_cup_to_green_trash_can__frame_0003,11_Use the right hand to pick up cup to green trash can,frame_0003,low,True,0.8376,1.0000,0.6753
+11_Use_the_right_hand_to_pick_up_cup_to_green_trash_can__frame_0004,11_Use the right hand to pick up cup to green trash can,frame_0004,low,True,0.8405,1.0000,0.6810
+11_Use_the_right_hand_to_pick_up_cup_to_green_trash_can__frame_0005,11_Use the right hand to pick up cup to green trash can,frame_0005,low,True,0.7251,1.0000,0.4501
+11_Use_the_right_hand_to_pick_up_cup_to_green_trash_can__frame_0006,11_Use the right hand to pick up cup to green trash can,frame_0006,low,True,0.9143,1.0000,0.8287
+11_Use_the_right_hand_to_pick_up_green_pepper_from_blac__frame_0001,11_Use the right hand to pick up green pepper from black shelf to inside brown paper bag.,frame_0001,low,True,0.9031,1.0000,0.8062
+11_Use_the_right_hand_to_pick_up_green_pepper_from_blac__frame_0002,11_Use the right hand to pick up green pepper from black shelf to inside brown paper bag.,frame_0002,low,True,0.9408,0.9911,0.8905
+11_Use_the_right_hand_to_pick_up_green_pepper_from_blac__frame_0003,11_Use the right hand to pick up green pepper from black shelf to inside brown paper bag.,frame_0003,low,True,0.9034,0.9999,0.8069
+11_Use_the_right_hand_to_pick_up_green_pepper_from_blac__frame_0004,11_Use the right hand to pick up green pepper from black shelf to inside brown paper bag.,frame_0004,low,True,0.9187,1.0000,0.8374
+11_Use_the_right_hand_to_pick_up_green_pepper_from_blac__frame_0005,11_Use the right hand to pick up green pepper from black shelf to inside brown paper bag.,frame_0005,low,True,0.8727,1.0000,0.7455
+11_Use_the_right_hand_to_pick_up_green_pepper_from_blac__frame_0006,11_Use the right hand to pick up green pepper from black shelf to inside brown paper bag.,frame_0006,low,True,0.8705,1.0000,0.7409
+12_Use_the_right_hand_to_pick_up_orange_to_metal_platfo__frame_0001,12_Use the right hand to pick up orange to metal platform,frame_0001,low,True,0.7587,0.9060,0.6114
+12_Use_the_right_hand_to_pick_up_orange_to_metal_platfo__frame_0002,12_Use the right hand to pick up orange to metal platform,frame_0002,low,True,0.8041,0.9964,0.6118
+12_Use_the_right_hand_to_pick_up_orange_to_metal_platfo__frame_0003,12_Use the right hand to pick up orange to metal platform,frame_0003,low,True,0.8999,0.9997,0.8001
+12_Use_the_right_hand_to_pick_up_orange_to_metal_platfo__frame_0004,12_Use the right hand to pick up orange to metal platform,frame_0004,low,True,0.8953,0.9999,0.7908
+12_Use_the_right_hand_to_pick_up_orange_to_metal_platfo__frame_0005,12_Use the right hand to pick up orange to metal platform,frame_0005,low,True,0.8903,1.0000,0.7807
+12_Use_the_right_hand_to_pick_up_orange_to_metal_platfo__frame_0006,12_Use the right hand to pick up orange to metal platform,frame_0006,low,True,0.8616,1.0000,0.7232
+13_Use_the_right_hand_to_pick_up_red_bell_pepper_from_c__frame_0001,13_Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack.,frame_0001,low,True,0.6285,0.9848,0.2722
+13_Use_the_right_hand_to_pick_up_red_bell_pepper_from_c__frame_0002,13_Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack.,frame_0002,low,True,0.5386,0.9919,0.0852
+13_Use_the_right_hand_to_pick_up_red_bell_pepper_from_c__frame_0003,13_Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack.,frame_0003,low,True,0.5504,0.9918,0.1090
+13_Use_the_right_hand_to_pick_up_red_bell_pepper_from_c__frame_0004,13_Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack.,frame_0004,low,True,0.6201,1.0000,0.2402
+13_Use_the_right_hand_to_pick_up_red_bell_pepper_from_c__frame_0005,13_Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack.,frame_0005,low,True,0.5297,1.0000,0.0594
+13_Use_the_right_hand_to_pick_up_red_bell_pepper_from_c__frame_0006,13_Use the right hand to pick up red bell pepper from center of tan countertop to brown bottom rack.,frame_0006,low,True,0.6022,1.0000,0.2043
+14_Use_the_right_hand_to_pick_up_rubiks_cube_from_from___frame_0001,14_Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf.,frame_0001,low,True,0.9151,0.9928,0.8374
+14_Use_the_right_hand_to_pick_up_rubiks_cube_from_from___frame_0002,14_Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf.,frame_0002,low,True,0.9684,1.0000,0.9369
+14_Use_the_right_hand_to_pick_up_rubiks_cube_from_from___frame_0003,14_Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf.,frame_0003,low,True,0.9458,1.0000,0.8915
+14_Use_the_right_hand_to_pick_up_rubiks_cube_from_from___frame_0004,14_Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf.,frame_0004,low,True,0.8870,1.0000,0.7740
+14_Use_the_right_hand_to_pick_up_rubiks_cube_from_from___frame_0005,14_Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf.,frame_0005,low,True,0.7374,1.0000,0.4748
+14_Use_the_right_hand_to_pick_up_rubiks_cube_from_from___frame_0006,14_Use the right hand to pick up rubik's cube from from the top of the three-tiered wooden shelf to to the bottom of the three-tiered wooden shelf.,frame_0006,low,True,0.8778,1.0000,0.7557
+15_Use_the_left_hand_to_pick_up_red_glass_from_light_re__frame_0001,15_Use the left hand to pick up red glass from light red plate to turquoise plate.,frame_0001,low,True,0.9221,0.9983,0.8459
+15_Use_the_left_hand_to_pick_up_red_glass_from_light_re__frame_0002,15_Use the left hand to pick up red glass from light red plate to turquoise plate.,frame_0002,low,True,0.8587,0.9999,0.7175
+15_Use_the_left_hand_to_pick_up_red_glass_from_light_re__frame_0003,15_Use the left hand to pick up red glass from light red plate to turquoise plate.,frame_0003,low,True,0.5166,0.9984,0.0348
+15_Use_the_left_hand_to_pick_up_red_glass_from_light_re__frame_0004,15_Use the left hand to pick up red glass from light red plate to turquoise plate.,frame_0004,low,True,0.5228,0.9996,0.0460
+15_Use_the_left_hand_to_pick_up_red_glass_from_light_re__frame_0005,15_Use the left hand to pick up red glass from light red plate to turquoise plate.,frame_0005,low,True,0.8784,0.9999,0.7568
+15_Use_the_left_hand_to_pick_up_red_glass_from_light_re__frame_0006,15_Use the left hand to pick up red glass from light red plate to turquoise plate.,frame_0006,low,True,0.7910,0.9999,0.5822
+16_Use_the_right_hand_to_pick_up_milk_carton_from_cente__frame_0001,16_Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate.,frame_0001,low,True,0.7773,0.9026,0.6520
+16_Use_the_right_hand_to_pick_up_milk_carton_from_cente__frame_0002,16_Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate.,frame_0002,low,True,0.8243,0.9200,0.7287
+16_Use_the_right_hand_to_pick_up_milk_carton_from_cente__frame_0003,16_Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate.,frame_0003,low,True,0.7780,0.9516,0.6044
+16_Use_the_right_hand_to_pick_up_milk_carton_from_cente__frame_0004,16_Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate.,frame_0004,low,True,0.6202,0.9693,0.2711
+16_Use_the_right_hand_to_pick_up_milk_carton_from_cente__frame_0005,16_Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate.,frame_0005,low,True,0.6934,0.9962,0.3907
+16_Use_the_right_hand_to_pick_up_milk_carton_from_cente__frame_0006,16_Use the right hand to pick up milk carton from center of pink plate to pale turquoise plate.,frame_0006,low,True,0.8637,0.9994,0.7280
+17_Use_the_right_hand_to_pick_up_orange_from_pink_plate__frame_0001,17_Use the right hand to pick up orange from pink plate to pale turquoise plate.,frame_0001,low,False,0.3762,0.7352,0.0172
+17_Use_the_right_hand_to_pick_up_orange_from_pink_plate__frame_0002,17_Use the right hand to pick up orange from pink plate to pale turquoise plate.,frame_0002,low,True,0.5208,0.9930,0.0485
+17_Use_the_right_hand_to_pick_up_orange_from_pink_plate__frame_0003,17_Use the right hand to pick up orange from pink plate to pale turquoise plate.,frame_0003,low,True,0.5779,0.9982,0.1576
+17_Use_the_right_hand_to_pick_up_orange_from_pink_plate__frame_0004,17_Use the right hand to pick up orange from pink plate to pale turquoise plate.,frame_0004,low,True,0.5205,0.9616,0.0795
+17_Use_the_right_hand_to_pick_up_orange_from_pink_plate__frame_0005,17_Use the right hand to pick up orange from pink plate to pale turquoise plate.,frame_0005,low,True,0.5059,0.9667,0.0450
+17_Use_the_right_hand_to_pick_up_orange_from_pink_plate__frame_0006,17_Use the right hand to pick up orange from pink plate to pale turquoise plate.,frame_0006,low,True,0.5386,0.9953,0.0818
+19_Use_the_right_hand_to_pick_up_sandwich_to_pizza_box__frame_0001,19_Use the right hand to pick up sandwich to pizza box,frame_0001,low,True,0.8759,0.9991,0.7526
+19_Use_the_right_hand_to_pick_up_sandwich_to_pizza_box__frame_0002,19_Use the right hand to pick up sandwich to pizza box,frame_0002,low,True,0.7188,0.9984,0.4393
+19_Use_the_right_hand_to_pick_up_sandwich_to_pizza_box__frame_0003,19_Use the right hand to pick up sandwich to pizza box,frame_0003,low,True,0.5766,0.9969,0.1563
+19_Use_the_right_hand_to_pick_up_sandwich_to_pizza_box__frame_0004,19_Use the right hand to pick up sandwich to pizza box,frame_0004,low,True,0.5507,0.9983,0.1032
+19_Use_the_right_hand_to_pick_up_sandwich_to_pizza_box__frame_0005,19_Use the right hand to pick up sandwich to pizza box,frame_0005,low,True,0.7497,1.0000,0.4995
+19_Use_the_right_hand_to_pick_up_sandwich_to_pizza_box__frame_0006,19_Use the right hand to pick up sandwich to pizza box,frame_0006,low,True,0.6619,1.0000,0.3238
+1_Use_the_right_hand_to_pick_up_orange_juice_carton_fro__frame_0001,1_Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl.,frame_0001,low,True,0.9016,0.9941,0.8092
+1_Use_the_right_hand_to_pick_up_orange_juice_carton_fro__frame_0002,1_Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl.,frame_0002,low,True,0.9225,0.9995,0.8455
+1_Use_the_right_hand_to_pick_up_orange_juice_carton_fro__frame_0003,1_Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl.,frame_0003,low,True,0.9308,0.9983,0.8632
+1_Use_the_right_hand_to_pick_up_orange_juice_carton_fro__frame_0004,1_Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl.,frame_0004,low,True,0.9217,0.9989,0.8445
+1_Use_the_right_hand_to_pick_up_orange_juice_carton_fro__frame_0005,1_Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl.,frame_0005,low,True,0.6324,0.9911,0.2736
+1_Use_the_right_hand_to_pick_up_orange_juice_carton_fro__frame_0006,1_Use the right hand to pick up orange juice carton from center of pink plate to center of green bowl.,frame_0006,low,True,0.6180,1.0000,0.2360
+20_Use_the_right_hand_to_pick_up_pink_peach_from_center__frame_0001,20_Use the right hand to pick up pink peach from center of white table to bottom level of the shelf.,frame_0001,low,False,0.7978,0.8233,0.7723
+20_Use_the_right_hand_to_pick_up_pink_peach_from_center__frame_0002,20_Use the right hand to pick up pink peach from center of white table to bottom level of the shelf.,frame_0002,low,True,0.7340,1.0000,0.4681
+20_Use_the_right_hand_to_pick_up_pink_peach_from_center__frame_0003,20_Use the right hand to pick up pink peach from center of white table to bottom level of the shelf.,frame_0003,low,True,0.9100,1.0000,0.8199
+20_Use_the_right_hand_to_pick_up_pink_peach_from_center__frame_0004,20_Use the right hand to pick up pink peach from center of white table to bottom level of the shelf.,frame_0004,low,True,0.9075,1.0000,0.8150
+20_Use_the_right_hand_to_pick_up_pink_peach_from_center__frame_0005,20_Use the right hand to pick up pink peach from center of white table to bottom level of the shelf.,frame_0005,low,True,0.7953,1.0000,0.5905
+20_Use_the_right_hand_to_pick_up_pink_peach_from_center__frame_0006,20_Use the right hand to pick up pink peach from center of white table to bottom level of the shelf.,frame_0006,low,True,0.8436,1.0000,0.6872
+28_Use_the_right_hand_to_pick_up_the_wooden_spoon_and_p__frame_0001,28_Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls,frame_0001,low,True,0.5437,0.9987,0.0887
+28_Use_the_right_hand_to_pick_up_the_wooden_spoon_and_p__frame_0002,28_Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls,frame_0002,low,True,0.8309,0.9999,0.6619
+28_Use_the_right_hand_to_pick_up_the_wooden_spoon_and_p__frame_0003,28_Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls,frame_0003,low,True,0.7677,1.0000,0.5355
+28_Use_the_right_hand_to_pick_up_the_wooden_spoon_and_p__frame_0004,28_Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls,frame_0004,low,True,0.8632,1.0000,0.7265
+28_Use_the_right_hand_to_pick_up_the_wooden_spoon_and_p__frame_0005,28_Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls,frame_0005,low,True,0.9187,0.9999,0.8376
+28_Use_the_right_hand_to_pick_up_the_wooden_spoon_and_p__frame_0006,28_Use the right hand to pick up the wooden spoon and perform a scooping motion between the two bowls,frame_0006,low,True,0.8924,1.0000,0.7848
+2_Use_the_right_hand_to_close_the_black_drawer__frame_0001,2_Use the right hand to close the black drawer,frame_0001,low,False,0.3696,0.5737,0.1656
+2_Use_the_right_hand_to_close_the_black_drawer__frame_0002,2_Use the right hand to close the black drawer,frame_0002,low,True,0.5477,0.9968,0.0987
+2_Use_the_right_hand_to_close_the_black_drawer__frame_0003,2_Use the right hand to close the black drawer,frame_0003,low,True,0.9210,1.0000,0.8420
+2_Use_the_right_hand_to_close_the_black_drawer__frame_0004,2_Use the right hand to close the black drawer,frame_0004,low,True,0.9075,0.9976,0.8173
+2_Use_the_right_hand_to_close_the_black_drawer__frame_0005,2_Use the right hand to close the black drawer,frame_0005,low,True,0.9157,0.9947,0.8368
+2_Use_the_right_hand_to_close_the_black_drawer__frame_0006,2_Use the right hand to close the black drawer,frame_0006,low,True,0.5659,0.9962,0.1355
+2_Use_the_right_hand_to_pick_up_tall_red_glass_from_cen__frame_0001,2_Use the right hand to pick up tall red glass from center of table to center of bright blue plate.,frame_0001,low,False,0.6832,0.6964,0.6701
+2_Use_the_right_hand_to_pick_up_tall_red_glass_from_cen__frame_0002,2_Use the right hand to pick up tall red glass from center of table to center of bright blue plate.,frame_0002,low,False,0.6196,0.5584,0.6809
+2_Use_the_right_hand_to_pick_up_tall_red_glass_from_cen__frame_0003,2_Use the right hand to pick up tall red glass from center of table to center of bright blue plate.,frame_0003,low,True,0.6293,0.9942,0.2644
+2_Use_the_right_hand_to_pick_up_tall_red_glass_from_cen__frame_0004,2_Use the right hand to pick up tall red glass from center of table to center of bright blue plate.,frame_0004,low,True,0.6337,1.0000,0.2673
+2_Use_the_right_hand_to_pick_up_tall_red_glass_from_cen__frame_0005,2_Use the right hand to pick up tall red glass from center of table to center of bright blue plate.,frame_0005,low,True,0.7088,1.0000,0.4175
+2_Use_the_right_hand_to_pick_up_tall_red_glass_from_cen__frame_0006,2_Use the right hand to pick up tall red glass from center of table to center of bright blue plate.,frame_0006,low,True,0.7380,1.0000,0.4759
+3_Use_the_right_hand_to_pick_up_green_bok_choy_from_fro__frame_0001,3_Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket.,frame_0001,low,True,0.6201,1.0000,0.2403
+3_Use_the_right_hand_to_pick_up_green_bok_choy_from_fro__frame_0002,3_Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket.,frame_0002,low,True,0.7143,0.9999,0.4287
+3_Use_the_right_hand_to_pick_up_green_bok_choy_from_fro__frame_0003,3_Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket.,frame_0003,low,True,0.9152,1.0000,0.8304
+3_Use_the_right_hand_to_pick_up_green_bok_choy_from_fro__frame_0004,3_Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket.,frame_0004,low,True,0.7017,1.0000,0.4034
+3_Use_the_right_hand_to_pick_up_green_bok_choy_from_fro__frame_0005,3_Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket.,frame_0005,low,True,0.6340,0.9922,0.2759
+3_Use_the_right_hand_to_pick_up_green_bok_choy_from_fro__frame_0006,3_Use the right hand to pick up green bok choy from from the center of the table to to the bottom rack of the black two-tiered wire basket.,frame_0006,low,True,0.6829,0.9956,0.3703
+4_Use_the_right_hand_to_close_waffle_maker__frame_0001,4_Use the right hand to close waffle maker,frame_0001,low,True,0.8919,0.9953,0.7884
+4_Use_the_right_hand_to_close_waffle_maker__frame_0002,4_Use the right hand to close waffle maker,frame_0002,low,True,0.9424,1.0000,0.8847
+4_Use_the_right_hand_to_close_waffle_maker__frame_0003,4_Use the right hand to close waffle maker,frame_0003,low,True,0.8694,0.9970,0.7419
+4_Use_the_right_hand_to_close_waffle_maker__frame_0004,4_Use the right hand to close waffle maker,frame_0004,low,True,0.9321,1.0000,0.8642
+4_Use_the_right_hand_to_close_waffle_maker__frame_0005,4_Use the right hand to close waffle maker,frame_0005,low,True,0.9569,1.0000,0.9138
+4_Use_the_right_hand_to_close_waffle_maker__frame_0006,4_Use the right hand to close waffle maker,frame_0006,low,True,0.9426,1.0000,0.8851
+5_Use_the_right_hand_to_pick_up_green_bok_choy_from_top__frame_0001,5_Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag.,frame_0001,low,True,0.8142,0.9361,0.6924
+5_Use_the_right_hand_to_pick_up_green_bok_choy_from_top__frame_0002,5_Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag.,frame_0002,low,True,0.9056,0.9998,0.8115
+5_Use_the_right_hand_to_pick_up_green_bok_choy_from_top__frame_0003,5_Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag.,frame_0003,low,True,0.9263,1.0000,0.8527
+5_Use_the_right_hand_to_pick_up_green_bok_choy_from_top__frame_0004,5_Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag.,frame_0004,low,True,0.9153,0.9996,0.8310
+5_Use_the_right_hand_to_pick_up_green_bok_choy_from_top__frame_0005,5_Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag.,frame_0005,low,True,0.9037,1.0000,0.8073
+5_Use_the_right_hand_to_pick_up_green_bok_choy_from_top__frame_0006,5_Use the right hand to pick up green bok choy from top tier of two tier black and white shelf to brown paper bag.,frame_0006,low,True,0.9130,1.0000,0.8261
+6_Use_the_right_hand_to_pick_up_orange_from_center_of_t__frame_0001,6_Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table.,frame_0001,low,True,0.5163,0.9215,0.1111
+6_Use_the_right_hand_to_pick_up_orange_from_center_of_t__frame_0002,6_Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table.,frame_0002,low,True,0.6211,0.9620,0.2802
+6_Use_the_right_hand_to_pick_up_orange_from_center_of_t__frame_0003,6_Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table.,frame_0003,low,True,0.6522,0.9959,0.3085
+6_Use_the_right_hand_to_pick_up_orange_from_center_of_t__frame_0004,6_Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table.,frame_0004,low,True,0.6972,1.0000,0.3945
+6_Use_the_right_hand_to_pick_up_orange_from_center_of_t__frame_0005,6_Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table.,frame_0005,low,True,0.6968,0.9999,0.3937
+6_Use_the_right_hand_to_pick_up_orange_from_center_of_t__frame_0006,6_Use the right hand to pick up orange from center of the table to lower level white shelf on the right side of the table.,frame_0006,low,True,0.6553,1.0000,0.3106
+8_Use_the_right_hand_to_pick_up_rubiks_cube_from_from_t__frame_0001,8_Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf.,frame_0001,low,True,0.8104,0.8455,0.7753
+8_Use_the_right_hand_to_pick_up_rubiks_cube_from_from_t__frame_0002,8_Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf.,frame_0002,low,True,0.8535,0.9983,0.7087
+8_Use_the_right_hand_to_pick_up_rubiks_cube_from_from_t__frame_0003,8_Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf.,frame_0003,low,True,0.8672,0.9986,0.7357
+8_Use_the_right_hand_to_pick_up_rubiks_cube_from_from_t__frame_0004,8_Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf.,frame_0004,low,True,0.8396,0.9994,0.6798
+8_Use_the_right_hand_to_pick_up_rubiks_cube_from_from_t__frame_0005,8_Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf.,frame_0005,low,True,0.9311,1.0000,0.8621
+8_Use_the_right_hand_to_pick_up_rubiks_cube_from_from_t__frame_0006,8_Use the right hand to pick up rubik's cube from from the bottom of the three-tiered wooden shelf to to the top of the three-tiered wooden shelf.,frame_0006,low,True,0.7502,1.0000,0.5005
+9_Use_the_right_hand_to_pick_up_milk_carton_from_from_t__frame_0001,9_Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate.,frame_0001,low,True,0.8756,1.0000,0.7511
+9_Use_the_right_hand_to_pick_up_milk_carton_from_from_t__frame_0002,9_Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate.,frame_0002,low,True,0.8631,0.9998,0.7265
+9_Use_the_right_hand_to_pick_up_milk_carton_from_from_t__frame_0003,9_Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate.,frame_0003,low,True,0.9039,1.0000,0.8078
+9_Use_the_right_hand_to_pick_up_milk_carton_from_from_t__frame_0004,9_Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate.,frame_0004,low,True,0.8990,1.0000,0.7980
+9_Use_the_right_hand_to_pick_up_milk_carton_from_from_t__frame_0005,9_Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate.,frame_0005,low,True,0.8862,1.0000,0.7725
+9_Use_the_right_hand_to_pick_up_milk_carton_from_from_t__frame_0006,9_Use the right hand to pick up milk carton from from the angled wooden shelf to to the cyan plate.,frame_0006,low,True,0.9145,0.9989,0.8301

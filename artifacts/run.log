@@ -1,0 +1,26 @@
+[2026-05-10 23:56:34,187] INFO: === Hallucination Detection Pipeline ===
+[2026-05-10 23:56:34,187] INFO: root_dir      : /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe
+[2026-05-10 23:56:34,187] INFO: artifacts_dir : artifacts
+[2026-05-10 23:56:34,187] INFO: device        : cuda
+[2026-05-10 23:56:34,201] INFO: Dataset: 138 high images, 138 low images across 23 tasks.
+[2026-05-10 23:56:34,201] INFO: Loading DINOv2 ViT-L/14 …
+[2026-05-10 23:56:39,718] INFO: === STAGE 1: Patch feature extraction ===
+[2026-05-10 23:56:39,718] INFO: [Stage 1] HDF5 exists at artifacts/memory_bank.h5 — skipping.
+[2026-05-10 23:56:39,718] INFO: === STAGE 2: Coreset + FAISS ===
+[2026-05-10 23:56:39,719] INFO: [Stage 2] Building coreset …
+[2026-05-10 23:56:39,732] INFO: [Stage 2] Loading 35328 patches for direct coreset …
+[2026-05-10 23:56:40,016] INFO: [Stage 2] Greedy coreset: 35328 → 3000 …
+[2026-05-10 23:56:40,462] INFO: [Stage 2] Coreset saved: (3000, 2048)
+[2026-05-10 23:56:40,500] INFO: [Stage 2] FAISS index saved → artifacts/faiss.idx
+[2026-05-10 23:56:40,502] INFO: === STAGE 3: Reference pool ===
+[2026-05-10 23:56:40,502] INFO: [Stage 3] Reference pool exists — skipping.
+[2026-05-10 23:56:40,502] INFO: === STAGE 4: Reference consistency graph ===
+[2026-05-10 23:56:45,903] INFO: [Stage 4] Reference graph exists — skipping.
+[2026-05-10 23:56:45,904] INFO: === CALIBRATION ===
+[2026-05-10 23:56:45,944] INFO: [Detector] Pass 1: raw PatchCore scores …
+[2026-05-10 23:56:59,885] INFO: [Detector] mu_pc=37.7219, std_pc=1.2742
+[2026-05-10 23:56:59,885] INFO: [Detector] Pass 2: normalized S_pc for threshold …
+[2026-05-10 23:57:13,813] INFO: [Detector] tau=0.8452
+[2026-05-10 23:57:13,816] INFO: === DETECTION: 138 low images ===
+[2026-05-11 00:12:08,359] INFO: Done. 138 images evaluated, 131 hallucinations detected.
+[2026-05-11 00:12:08,359] INFO: Results → artifacts/results.csv

@@ -98,12 +98,12 @@ def test_detector_creates_hallucination_result(tmp_path):
     task_name = "demo_task"
     query_path = _make_query_png(tmp_path)
 
-    # Create 3 ref PNGs on disk (detector does _discover_refs from high_dir)
-    high_dir = tmp_path / "high" / task_name
-    high_dir.mkdir(parents=True)
+    # Create 3 ref PNGs on disk (detector does _discover_refs from reference_dir)
+    ref_root = tmp_path / "high" / task_name
+    ref_root.mkdir(parents=True)
     ref_paths = []
     for i in range(3):
-        p = _make_query_png(high_dir, f"ref_{i:02d}.png")
+        p = _make_query_png(ref_root, f"ref_{i:02d}.png")
         ref_paths.append(p)
 
     # Mock matcher: always returns the same small, low-variance warp
@@ -116,7 +116,7 @@ def test_detector_creates_hallucination_result(tmp_path):
         save_heatmaps=False,
         erosion_k=EROSION_K,
         device="cpu",
-        high_dir=tmp_path / "high",
+        reference_dir=tmp_path / "high",
     )
     detector = WarpVarianceDetector(
         config=cfg,
@@ -143,9 +143,9 @@ def test_detector_h_score_high_when_warp_var_extreme(tmp_path):
     task_name = "extreme_task"
     query_path = _make_query_png(tmp_path)
 
-    high_dir = tmp_path / "high" / task_name
-    high_dir.mkdir(parents=True)
-    ref_paths = [_make_query_png(high_dir, f"ref_{i:02d}.png") for i in range(4)]
+    ref_root = tmp_path / "high" / task_name
+    ref_root.mkdir(parents=True)
+    ref_paths = [_make_query_png(ref_root, f"ref_{i:02d}.png") for i in range(4)]
 
     call_count = 0
 
@@ -183,7 +183,7 @@ def test_detector_h_score_high_when_warp_var_extreme(tmp_path):
 
     cfg = WarpScoreConfig(
         vis_size=VIS, save_heatmaps=False, erosion_k=EROSION_K, device="cpu",
-        high_dir=tmp_path / "high",
+        reference_dir=tmp_path / "high",
     )
     detector = WarpVarianceDetector(
         config=cfg,
@@ -209,9 +209,9 @@ def test_detector_csv_row_keys(tmp_path):
     task_name = "csv_task"
     query_path = _make_query_png(tmp_path)
 
-    high_dir = tmp_path / "high" / task_name
-    high_dir.mkdir(parents=True)
-    ref_paths = [_make_query_png(high_dir, f"ref_{i:02d}.png") for i in range(2)]
+    ref_root = tmp_path / "high" / task_name
+    ref_root.mkdir(parents=True)
+    ref_paths = [_make_query_png(ref_root, f"ref_{i:02d}.png") for i in range(2)]
 
     matcher = MagicMock()
     matcher.match.return_value = _make_fixed_match_result(seed=7)
@@ -219,7 +219,7 @@ def test_detector_csv_row_keys(tmp_path):
     calib = _make_artifact(task_name)
     cfg = WarpScoreConfig(
         vis_size=VIS, save_heatmaps=False, erosion_k=EROSION_K, device="cpu",
-        high_dir=tmp_path / "high",
+        reference_dir=tmp_path / "high",
     )
     detector = WarpVarianceDetector(
         config=cfg,

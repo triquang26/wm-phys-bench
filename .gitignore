@@ -1,4 +1,6 @@
+# =============================================================================
 # Python
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -7,62 +9,174 @@ __pycache__/
 *.egg-info/
 .installed.cfg
 *.egg
+*.pyc
+*.pyo
+.python-version
 
+# =============================================================================
 # Virtual envs
+# =============================================================================
 .venv/
 .venv*/
 venv/
 env/
 
+# =============================================================================
 # Test / coverage
+# =============================================================================
 .pytest_cache/
 .coverage
 htmlcov/
 
-# IDE
+# =============================================================================
+# IDE / OS
+# =============================================================================
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
 
-# ============================================================================
-# Project-specific
-# ============================================================================
+# =============================================================================
+# Secrets / environment
+# =============================================================================
+.env
+.env.*
 
-# DreamGen — heavy artifacts (NOT to be committed)
-dreamgen_data/cosmos-predict2/       # ~250GB cloned repo + checkpoints
-dreamgen_data/data/                  # HF dataset frames + batch_input.json
-dreamgen_data/output/                # generated mp4s
-dreamgen_data/checkpoints/           # standalone ckpt dir if used
-
-# warp_score — calibration + results artifacts
-artifacts/
-results/
-*.npz
-*.h5
-*.csv
-
+# =============================================================================
 # Logs
+# =============================================================================
 *.log
-run.log
 
-# Models (we never commit large model files)
+# =============================================================================
+# Lock files (generated, not committed)
+# =============================================================================
+uv.lock
+
+# =============================================================================
+# Large model / data files — never commit
+# =============================================================================
 *.pt
 *.bin
 *.safetensors
+*.npz
+*.h5
+*.npy
+*.idx
 
-# Heatmap PNG outputs from detection runs
-**/heatmaps/
+# =============================================================================
+# Large binary / media
+# =============================================================================
+*.mp4
+*.exr
+*.zip
+*.tar.*
+*.tar.xz
+*.tar.gz
+*.tar.bz2
 
-# Misc legacy artifacts
-files.zip
+# =============================================================================
+# Blender, hand mesh, studio HDR — too large
+# =============================================================================
+blender-*/
+blender-4.2.1-linux-x64*
+hand_16k/
+studio_small_08_4k.exr
+demo.zip
+files\ (1).zip
 
-# Data directory — large datasets, never commit
-# Actual dirs live here or as symlinks pointing outside the repo
+# =============================================================================
+# Project data directories — large datasets
+# =============================================================================
 data/
+checkpoints/
 
-# Allow specific small files we DO want tracked
-!warp_score/configs/*.yaml
-!tests/data/                         # small unit-test fixtures, if added later
+# =============================================================================
+# DreamGen heavy artifacts (subdirs only; code files are kept)
+# =============================================================================
+dreamgen_data/checkpoints/
+dreamgen_data/cosmos-predict2/
+dreamgen_data/output/
+dreamgen_data/__pycache__/
+
+# =============================================================================
+# warp_score artifacts — large computed binaries
+# =============================================================================
+artifacts/MC.npy
+artifacts/S_ref.npy
+artifacts/faiss.idx
+artifacts/global_feats.npy
+artifacts/memory_bank.h5
+artifacts/mu_ref.npy
+artifacts/ref_feats_normalized.npy
+artifacts/ref_indices.npy
+artifacts/sigma_ref.npy
+
+# Subdirs inside artifacts with only large/binary content
+artifacts/comparison_v2_fixed/
+artifacts/comparison_videos/
+artifacts/heatmaps/
+**/heatmaps/
+results/
+
+# =============================================================================
+# Whitelist — keep small / important files inside otherwise-ignored patterns
+# =============================================================================
+
+# Keep calibration JSON and small CSVs inside artifacts
+!artifacts/calibration.npz
+!artifacts/**/*.json
+!artifacts/**/*.csv
+!artifacts/**/*.log
+
+# Keep the v1_smoke and v2/v9 summary JSONs/CSVs (small)
+!artifacts/v1_smoke/
+!artifacts/v1_smoke/**
+artifacts/v1_smoke/*.npz
+artifacts/v1_smoke/heatmaps/
+
+!artifacts/v2_held_out_eval/
+!artifacts/v2_held_out_eval/**
+artifacts/v2_held_out_eval/*.npz
+artifacts/v2_held_out_eval/heatmaps/
+
+!artifacts/v9_dreamgen/
+!artifacts/v9_dreamgen/**
+artifacts/v9_dreamgen/*.npz
+artifacts/v9_dreamgen/heatmaps/
+
+# Keep dreamgen_data code/config files (not checkpoints or generated output)
+!dreamgen_data/
+!dreamgen_data/ENV.md
+!dreamgen_data/Makefile
+!dreamgen_data/README.md
+!dreamgen_data/generate.py
+!dreamgen_data/postprocess.py
+!dreamgen_data/profiles.py
+!dreamgen_data/prompts.json
+!dreamgen_data/requirements.txt
+!dreamgen_data/setup.sh
+
+# Keep .claude skills directory
+!.claude/
+!.claude/**
+
+# Keep warp_score configs (already tracked by default but ensure not ignored)
+!warp_score/
+!warp_score/**
+warp_score/__pycache__/
+warp_score/**/__pycache__/
+!scripts/
+!scripts/**
+scripts/__pycache__/
+scripts/**/__pycache__/
+!tests/
+!tests/**
+tests/__pycache__/
+tests/**/__pycache__/
+!third_party/
+!third_party/**
+third_party/__pycache__/
+third_party/**/__pycache__/
+
+# labels.csv is small enough to track
+!labels.csv

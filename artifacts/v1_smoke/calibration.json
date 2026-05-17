@@ -1,0 +1,50 @@
+{
+  "n_tasks": 1,
+  "tasks": {
+    "0_Open the box": {
+      "slug": "0_Open_the_box",
+      "n_refs": 53,
+      "mean_ivar": 0.0016711684875190258,
+      "std_ivar": 0.0012920653680339456,
+      "has_per_pixel": true
+    }
+  },
+  "global": {
+    "n_refs": 53,
+    "mean_ivar": 0.0016711684875190258,
+    "std_ivar": 0.0012920653680339456
+  },
+  "config_snapshot": {
+    "root_dir": "/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination",
+    "high_dir": "/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high",
+    "low_dir": "/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/low",
+    "artifacts_dir": "artifacts/v1_smoke",
+    "setting": "turbo",
+    "use_precision": true,
+    "bidirectional": false,
+    "vis_size": 224,
+    "device": "cuda",
+    "erosion_k": 10,
+    "per_pixel_calibration": true,
+    "gpd_tail": false,
+    "n_min_refs": 30,
+    "rng_seed": 42,
+    "signal_names": [
+      "ivar",
+      "peak",
+      "cert"
+    ],
+    "fuser": "stouffer",
+    "stouffer_weights": {
+      "ivar": 2.0,
+      "peak": 1.0,
+      "cert": 1.0
+    },
+    "fpr_alpha": 0.05,
+    "save_heatmaps": true,
+    "calib_path": "artifacts/v1_smoke/calibration.npz",
+    "summary_csv": "artifacts/v1_smoke/summary.csv",
+    "run_log": "artifacts/v1_smoke/run.log"
+  },
+  "created_at": "2026-05-16T21:59:39"
+}

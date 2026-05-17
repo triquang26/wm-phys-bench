@@ -1,325 +1,155 @@
-"""postprocess.py — Bridge from cosmos-predict2 video output to image_no_bg/ format.
+"""MP4 -> 50 frames -> SAM3 bg removal, writing data/query/high/<task>/*.png.
 
-Pipeline:
-    output/<profile>/item_XXXX/*.mp4
-        → extract N frames from each video
-        → SAM3 background removal (bg → (127,127,127))
-        → image_no_bg/<split>/<task>/frame_NNNN.png
+Usage:
+    python postprocess.py \
+        --video_root ../data/cosmos_synthetic_data/query/high \
+        --frames_root ../data/cosmos_frames_raw/query/high \
+        --out_root ../data/query/high
 
-Mapping:
-    profile="high"        → split="high"   (calibration refs, label=0)
-    profile="hallucinate" → split="low"    (test set, label=1)
+Resume-safe: skips an output PNG if it already exists.
 
-Task name = sanitized GR1 prompt (from metadata.jsonl), prefixed with item idx.
-
-Idempotent: skips a target PNG if it already exists.
+Reuses existing utilities (no logic duplication):
+  * scripts/extract_frames.py::extract_uniform
+        Uniformly samples N frames from an MP4 (np.linspace(0, total-1, N)).
+  * sam3.py::SAM3Segmenter (+ PROMPTS list)
+        SAM3 multi-prompt segmenter producing an H*W uint8 alpha mask. We use
+        its .segment_multi_prompt() + .remove_background() pair.
 """
 from __future__ import annotations
 
 import argparse
-import json
-from dataclasses import dataclass, field
+import sys
 from pathlib import Path
-from typing import Iterator, Literal, Optional
 
-import cv2
-import numpy as np
-from tqdm import tqdm
+# ---------------------------------------------------------------------------
+# Wire reusable utilities onto sys.path before importing.
+# - extract_frames.py lives at <repo>/scripts/
+# - sam3.py lives at <repo>/../sam3.py (parent of repo, calibration/feepe/)
+# ---------------------------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parents[1]              # feature_matching_eval_hallucination/
+PARENT    = REPO_ROOT.parent                                  # calibration/feepe/
+# Insert in reverse so scripts/ ends up FIRST in sys.path.
+# (outer feepe/extract_frames.py is a stale older variant; we want repo/scripts/.)
+for p in (PARENT, REPO_ROOT, REPO_ROOT / "scripts"):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
-
-# ============================================================================
-# Frame extraction
-# ============================================================================
-
-class VideoFrameExtractor:
-    """Extract N frames from an mp4. Strategies: 'uniform' (evenly spaced) or 'tail'."""
-
-    def __init__(
-        self,
-        frames_per_video: int = 1,
-        strategy: Literal["uniform", "tail", "first"] = "uniform",
-    ) -> None:
-        if frames_per_video < 1:
-            raise ValueError(f"frames_per_video must be >= 1, got {frames_per_video}")
-        self.frames_per_video = frames_per_video
-        self.strategy = strategy
-
-    def extract(self, video_path: Path) -> list[np.ndarray]:
-        cap = cv2.VideoCapture(str(video_path))
-        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if n_frames <= 0:
-            cap.release()
-            return []
-
-        target_idxs = self._target_indices(n_frames)
-        frames: list[np.ndarray] = []
-        for idx in target_idxs:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-            ok, frame = cap.read()
-            if ok and frame is not None:
-                frames.append(frame)
-        cap.release()
-        return frames
-
-    def _target_indices(self, n_frames: int) -> list[int]:
-        k = min(self.frames_per_video, n_frames)
-        if self.strategy == "first":
-            return list(range(k))
-        if self.strategy == "tail":
-            return list(range(n_frames - k, n_frames))
-        # uniform
-        return [
-            int(round((i + 1) * n_frames / (k + 1))) - 1
-            for i in range(k)
-        ]
+from extract_frames import extract_uniform                    # noqa: E402  (reuse)
+from sam3 import SAM3Segmenter, PROMPTS                       # noqa: E402  (reuse)
+from tqdm import tqdm                                          # noqa: E402
 
 
-# ============================================================================
-# Background removal — SAM3
-# ============================================================================
-
-class SAM3BackgroundRemover:
-    """Set non-foreground pixels to (127,127,127). Wraps existing feepe/sam3.py logic.
-
-    Lazy import: sam3 deps are heavy. Construct + run only when actually needed.
-    """
-
-    BG_VALUE = (127, 127, 127)
+# ---------------------------------------------------------------------------
+# Harvester
+# ---------------------------------------------------------------------------
+class QueryHighHarvester:
+    """video_root/*.mp4  ->  frames_root/<task>/frame_NNNN.png  ->  out_root/<task>/frame_NNNN.png"""
 
     def __init__(
         self,
-        device: str = "cuda",
-        text_prompts: Optional[list[str]] = None,
-        score_thresh: float = 0.3,
-    ) -> None:
-        self.device = device
-        self.text_prompts = text_prompts or ["robot arm", "robot gripper", "object"]
-        self.score_thresh = score_thresh
-        self._model = None
-
-    def _ensure_model(self) -> None:
-        if self._model is not None:
-            return
-        try:
-            # Try to reuse the existing SAM3 wrapper in feepe/
-            import sys
-            sam3_dir = Path(__file__).parent.parent.parent
-            if str(sam3_dir) not in sys.path:
-                sys.path.insert(0, str(sam3_dir))
-            import sam3  # type: ignore
-            # The exact API is project-specific; expose just what we need.
-            self._model = sam3
-        except ImportError as e:
-            raise ImportError(
-                "Could not import sam3 module. Ensure calibration/feepe/sam3.py is "
-                "accessible and SAM3 is installed."
-            ) from e
-
-    def remove(self, frame_bgr: np.ndarray) -> np.ndarray:
-        """Run SAM3, set bg pixels to (127,127,127).
-
-        If sam3 module fails or fg mask is empty, returns the original frame
-        unchanged (caller can decide to drop it).
-        """
-        self._ensure_model()
-        try:
-            mask = self._predict_mask(frame_bgr)
-        except Exception as e:
-            print(f"[postprocess] SAM3 failed: {e}; returning raw frame.")
-            return frame_bgr
-
-        if mask is None or not mask.any():
-            return frame_bgr
-
-        out = frame_bgr.copy()
-        out[~mask] = self.BG_VALUE
-        return out
-
-    def _predict_mask(self, frame_bgr: np.ndarray) -> Optional[np.ndarray]:
-        """Adapter — overridable. Default tries common entrypoints on the sam3 module."""
-        sam3 = self._model
-        # Possible APIs: predict(image, prompts) or run(image)
-        for attr in ("predict_mask", "predict", "segment", "run"):
-            fn = getattr(sam3, attr, None)
-            if callable(fn):
-                result = fn(
-                    frame_bgr,
-                    text_prompts=self.text_prompts,
-                    score_thresh=self.score_thresh,
-                    device=self.device,
-                )
-                # Result may be dict {'mask': ndarray} or ndarray directly
-                if isinstance(result, dict):
-                    return result.get("mask")
-                if isinstance(result, np.ndarray):
-                    return result.astype(bool)
-        raise RuntimeError(
-            "SAM3 module has no recognized entrypoint. "
-            "Override _predict_mask() with the correct call signature."
-        )
-
-
-# ============================================================================
-# Harvester — orchestrator
-# ============================================================================
-
-@dataclass
-class HarvestResult:
-    profile: str
-    split: str
-    n_videos_seen: int = 0
-    n_frames_extracted: int = 0
-    n_frames_written: int = 0
-    n_skipped_existing: int = 0
-    failed_videos: list[str] = field(default_factory=list)
-
-
-class DreamGenHarvester:
-    """video output/<profile>/item_XXXX/*.mp4 → image_no_bg/<split>/<task>/frame_NNNN.png."""
-
-    PROFILE_TO_SPLIT = {"high": "high", "hallucinate": "low"}
-
-    def __init__(
-        self,
-        extractor: VideoFrameExtractor,
-        remover: SAM3BackgroundRemover,
+        video_root: Path,
+        frames_root: Path,
         out_root: Path,
-        metadata_jsonl: Path,
-        max_task_name_len: int = 80,
+        frames_per_video: int = 50,
+        sam3_threshold: float = 0.3,
+        prompts: list[str] | None = None,
     ) -> None:
-        self.extractor = extractor
-        self.remover = remover
+        self.video_root = Path(video_root)
+        self.frames_root = Path(frames_root)
         self.out_root = Path(out_root)
-        self.max_task_name_len = max_task_name_len
-        self.metadata = self._load_metadata(metadata_jsonl)
+        self.frames_per_video = frames_per_video
+        self.sam3_threshold = sam3_threshold
+        self.prompts = list(prompts) if prompts is not None else list(PROMPTS)
 
-    def harvest(self, video_root: Path, profile: str) -> HarvestResult:
-        if profile not in self.PROFILE_TO_SPLIT:
-            raise ValueError(
-                f"Unknown profile '{profile}'. Known: {list(self.PROFILE_TO_SPLIT)}"
-            )
-        split = self.PROFILE_TO_SPLIT[profile]
-        result = HarvestResult(profile=profile, split=split)
+        self.frames_root.mkdir(parents=True, exist_ok=True)
+        self.out_root.mkdir(parents=True, exist_ok=True)
 
-        video_root = Path(video_root)
-        item_dirs = sorted(d for d in video_root.iterdir() if d.is_dir() and d.name.startswith("item_"))
+    # -- public ---------------------------------------------------------
 
-        for item_dir in tqdm(item_dirs, desc=f"harvest {profile}"):
-            item_idx = self._parse_item_idx(item_dir.name)
-            task_dir_name = self._task_dir_name(item_idx)
-            task_out_dir = self.out_root / split / task_dir_name
-            task_out_dir.mkdir(parents=True, exist_ok=True)
+    def run(self) -> None:
+        self._extract_all()
+        self._remove_bg_all()
 
-            self._harvest_one_item(item_dir, task_out_dir, result)
+    # -- step 1: video -> raw PNGs -------------------------------------
 
-        print(
-            f"[harvest] profile={profile}  split={split}  "
-            f"videos={result.n_videos_seen}  frames_written={result.n_frames_written}  "
-            f"skipped={result.n_skipped_existing}  failed={len(result.failed_videos)}"
-        )
-        return result
+    def _extract_all(self) -> None:
+        mp4s = sorted(self.video_root.glob("*.mp4"))
+        if not mp4s:
+            print(f"[postprocess] WARN: no MP4s in {self.video_root}")
+            return
+        total_frames = 0
+        print(f"[postprocess] extract: {len(mp4s)} videos -> {self.frames_root}")
+        for mp4 in mp4s:
+            task = mp4.stem
+            task_dir = self.frames_root / task
+            n = extract_uniform(mp4, task_dir, self.frames_per_video)
+            total_frames += n
+            print(f"  {n:3d} frames -> {task[:70]}")
+        print(f"[postprocess] extracted {total_frames} frames total")
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # -- step 2: raw PNG -> SAM3 bg-removed PNG -------------------------
 
-    @staticmethod
-    def _load_metadata(metadata_jsonl: Path) -> dict[int, dict]:
-        out: dict[int, dict] = {}
-        with open(metadata_jsonl, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                rec = json.loads(line)
-                out[int(rec["idx"])] = rec
-        return out
+    def _remove_bg_all(self) -> None:
+        task_dirs = sorted(d for d in self.frames_root.iterdir() if d.is_dir())
+        if not task_dirs:
+            print(f"[postprocess] WARN: no per-task frame dirs in {self.frames_root}")
+            return
 
-    @staticmethod
-    def _parse_item_idx(item_dir_name: str) -> int:
-        # "item_0023" → 23
-        return int(item_dir_name.split("_")[1])
+        # Lazy: only construct the SAM3 segmenter if we actually have work to do.
+        seg: SAM3Segmenter | None = None
 
-    def _task_dir_name(self, item_idx: int) -> str:
-        meta = self.metadata.get(item_idx)
-        if meta is None:
-            return f"{item_idx}_unknown"
-        prompt = meta["prompt"]
-        safe = (
-            prompt.replace("/", "_")
-                  .replace("'", "")
-                  .replace("\n", " ")
-                  .strip()
-        )
-        truncated = safe[: self.max_task_name_len]
-        return f"{item_idx}_{truncated}"
-
-    def _harvest_one_item(
-        self,
-        item_dir: Path,
-        task_out_dir: Path,
-        result: HarvestResult,
-    ) -> None:
-        videos = sorted(item_dir.glob("*.mp4"))
-        for video_path in videos:
-            result.n_videos_seen += 1
-            frames = self.extractor.extract(video_path)
-            if not frames:
-                result.failed_videos.append(str(video_path))
+        for task_dir in task_dirs:
+            out_task = self.out_root / task_dir.name
+            out_task.mkdir(parents=True, exist_ok=True)
+            pngs = sorted(task_dir.glob("*.png"))
+            pending = [p for p in pngs if not (out_task / p.name).exists()]
+            if not pending:
+                print(f"[postprocess] skip (all done): {task_dir.name}")
                 continue
-            result.n_frames_extracted += len(frames)
+            if seg is None:
+                print("[postprocess] loading SAM3...")
+                seg = SAM3Segmenter()
+            print(f"[postprocess] bg-remove: {task_dir.name}  ({len(pending)} frames)")
+            for png in tqdm(pending, desc=task_dir.name[:40], leave=False):
+                out_png = out_task / png.name
+                try:
+                    alpha = seg.segment_multi_prompt(
+                        png, self.prompts, threshold=self.sam3_threshold
+                    )
+                    if alpha is None:
+                        # No mask found at all -- copy raw frame so downstream
+                        # tooling never sees a missing index. SAM3 caller would
+                        # otherwise drop the frame entirely.
+                        import shutil
+                        shutil.copyfile(png, out_png)
+                        continue
+                    out_img = seg.remove_background(png, alpha)
+                    out_img.save(out_png)
+                except Exception as e:
+                    print(f"  [warn] {png.name}: {e}")
 
-            for offset, frame in enumerate(frames):
-                stem = video_path.stem
-                if self.extractor.frames_per_video == 1:
-                    out_path = task_out_dir / f"{stem}.png"
-                else:
-                    out_path = task_out_dir / f"{stem}_f{offset:02d}.png"
 
-                if out_path.exists():
-                    result.n_skipped_existing += 1
-                    continue
-
-                masked = self.remover.remove(frame)
-                cv2.imwrite(str(out_path), masked)
-                result.n_frames_written += 1
-
-
-# ============================================================================
+# ---------------------------------------------------------------------------
 # CLI
-# ============================================================================
-
+# ---------------------------------------------------------------------------
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Harvest cosmos-predict2 videos → image_no_bg/")
-    ap.add_argument("--video_root", type=str, required=True,
-                    help="output/<profile>/ dir containing item_XXXX subdirs")
-    ap.add_argument("--profile", choices=list(DreamGenHarvester.PROFILE_TO_SPLIT), required=True)
-    ap.add_argument("--metadata", type=str, default="data/metadata.jsonl")
-    ap.add_argument("--out_root", type=str, required=True,
-                    help="image_no_bg root (will create <out_root>/<split>/<task>/)")
-    ap.add_argument("--frames_per_video", type=int, default=1)
-    ap.add_argument("--strategy", choices=["uniform", "tail", "first"], default="uniform")
-    ap.add_argument("--device", type=str, default="cuda")
-    ap.add_argument("--no_sam3", action="store_true",
-                    help="Skip SAM3 bg removal (debug — keeps raw frames).")
+    ap = argparse.ArgumentParser(description="MP4 -> 50 frames -> SAM3 bg removal.")
+    ap.add_argument("--video_root", required=True, type=Path,
+                    help="Dir containing <task>.mp4 files.")
+    ap.add_argument("--frames_root", required=True, type=Path,
+                    help="Staging dir for raw extracted PNGs.")
+    ap.add_argument("--out_root", required=True, type=Path,
+                    help="Final dir: out_root/<task>/frame_NNNN.png (bg removed).")
+    ap.add_argument("--frames_per_video", type=int, default=50)
+    ap.add_argument("--sam3_threshold", type=float, default=0.3)
     args = ap.parse_args()
-
-    extractor = VideoFrameExtractor(
+    QueryHighHarvester(
+        video_root=args.video_root,
+        frames_root=args.frames_root,
+        out_root=args.out_root,
         frames_per_video=args.frames_per_video,
-        strategy=args.strategy,
-    )
-
-    if args.no_sam3:
-        class _IdentityRemover:
-            def remove(self, f): return f
-        remover = _IdentityRemover()  # type: ignore
-    else:
-        remover = SAM3BackgroundRemover(device=args.device)
-
-    harvester = DreamGenHarvester(
-        extractor=extractor,
-        remover=remover,  # type: ignore[arg-type]
-        out_root=Path(args.out_root),
-        metadata_jsonl=Path(args.metadata),
-    )
-    harvester.harvest(video_root=Path(args.video_root), profile=args.profile)
+        sam3_threshold=args.sam3_threshold,
+    ).run()
 
 
 if __name__ == "__main__":

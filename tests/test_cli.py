@@ -74,15 +74,31 @@ def test_eval_requires_labels_arg():
     )
 
 
-def test_global_high_dir_flag_accepted():
-    """--high_dir is a valid global flag; any non-argparse error (e.g.
+def test_global_ref_dir_flag_accepted():
+    """--ref_dir is a valid global flag; any non-argparse error (e.g.
     FileNotFoundError) is acceptable — SystemExit(2) is not."""
     try:
-        main(["--high_dir", "/tmp", "calibrate"])
+        main(["--ref_dir", "/tmp", "calibrate"])
     except SystemExit as exc:
         assert exc.code != 2, (
-            f"argparse rejected --high_dir with SystemExit(2): {exc}"
+            f"argparse rejected --ref_dir with SystemExit(2): {exc}"
         )
     except Exception:
         # FileNotFoundError, RuntimeError, ImportError etc. are all fine
+        pass
+
+
+def test_global_query_dirs_flags_accepted():
+    """--query_high_dir and --query_low_dir are valid global flags."""
+    try:
+        main([
+            "--query_high_dir", "/tmp",
+            "--query_low_dir", "/tmp",
+            "calibrate",
+        ])
+    except SystemExit as exc:
+        assert exc.code != 2, (
+            f"argparse rejected --query_*_dir with SystemExit(2): {exc}"
+        )
+    except Exception:
         pass

@@ -1,0 +1,69 @@
+[2026-05-16 20:59:45,113] INFO === Calibrate ===
+[2026-05-16 20:59:45,113] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 20:59:45,132] INFO Found 1165 refs across 23 tasks
+[2026-05-16 21:01:52,380] INFO === Calibrate ===
+[2026-05-16 21:01:52,380] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:01:52,400] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:03:56,777] INFO === Calibrate ===
+[2026-05-16 21:03:56,777] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:03:56,793] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:05:01,769] INFO === Calibrate ===
+[2026-05-16 21:05:01,769] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:05:01,784] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:07:10,643] INFO === Calibrate ===
+[2026-05-16 21:07:10,643] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:07:10,664] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:08:32,499] INFO === Calibrate ===
+[2026-05-16 21:08:32,499] INFO high_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:08:32,690] INFO Found 162 refs across 26 tasks
+[2026-05-16 21:09:40,994] INFO === Calibrate ===
+[2026-05-16 21:09:40,995] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:09:41,013] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:12:03,297] INFO === Calibrate ===
+[2026-05-16 21:12:03,297] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:12:03,313] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:14:38,047] INFO === Calibrate ===
+[2026-05-16 21:14:38,047] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:14:38,074] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:16:46,962] INFO === Calibrate ===
+[2026-05-16 21:16:46,963] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:16:46,984] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:18:37,214] INFO === Calibrate ===
+[2026-05-16 21:18:37,214] INFO high_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:18:37,428] INFO Found 143 refs across 29 tasks
+[2026-05-16 21:18:57,362] INFO === Calibrate ===
+[2026-05-16 21:18:57,362] INFO high_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:18:57,619] INFO Found 143 refs across 29 tasks
+[2026-05-16 21:19:09,103] INFO === Calibrate ===
+[2026-05-16 21:19:09,104] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:19:09,121] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:21:16,685] INFO === Calibrate ===
+[2026-05-16 21:21:16,685] INFO high_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:21:16,876] INFO Found 143 refs across 29 tasks
+[2026-05-16 21:22:12,065] INFO === Calibrate ===
+[2026-05-16 21:22:12,065] INFO high_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/image_no_bg/high  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:22:12,080] INFO Found 1219 refs across 23 tasks
+[2026-05-16 21:25:32,977] INFO === Calibrate ===
+[2026-05-16 21:25:32,977] INFO high_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:25:33,155] INFO Found 160 refs across 29 tasks
+[2026-05-16 21:27:36,599] INFO === Calibrate ===
+[2026-05-16 21:27:36,599] INFO high_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-16 21:27:36,781] INFO Found 160 refs across 29 tasks
+[2026-05-17 01:51:11,546] INFO === Calibrate ===
+[2026-05-17 01:51:11,546] INFO reference_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/reference  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-17 01:51:11,559] INFO Found 1219 refs across 23 tasks
+[2026-05-17 01:54:06,425] INFO === Calibrate ===
+[2026-05-17 01:54:06,425] INFO reference_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/reference  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-17 01:54:06,438] INFO Found 1219 refs across 23 tasks
+[2026-05-17 01:55:04,619] INFO === Calibrate ===
+[2026-05-17 01:55:04,619] INFO reference_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-17 01:55:04,898] INFO Found 177 refs across 29 tasks
+[2026-05-17 01:55:14,063] INFO === Calibrate ===
+[2026-05-17 01:55:14,063] INFO reference_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/reference  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-17 01:55:14,075] INFO Found 1219 refs across 23 tasks
+[2026-05-17 01:57:52,331] INFO === Calibrate ===
+[2026-05-17 01:57:52,331] INFO reference_dir=/tmp  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-17 01:57:52,633] INFO Found 177 refs across 29 tasks
+[2026-05-17 01:58:01,181] INFO === Calibrate ===
+[2026-05-17 01:58:01,181] INFO reference_dir=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/data/reference  artifacts=/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/artifacts/v9_dreamgen
+[2026-05-17 01:58:01,192] INFO Found 1219 refs across 23 tasks

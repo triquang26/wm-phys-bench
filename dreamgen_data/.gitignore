@@ -1,0 +1,16 @@
+# dreamgen_data/.gitignore
+# Large/generated artifacts — do NOT commit these from this subdirectory
+
+# Cosmos-Predict2 cloned repo + its virtualenv
+cosmos-predict2/
+
+# Model checkpoints (multi-GB)
+checkpoints/
+
+# Generated mp4 outputs
+output/
+
+# Python cache
+__pycache__/
+*.pyc
+*.log
