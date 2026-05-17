@@ -71,6 +71,9 @@ from profiles import HIGH, GenerationProfile, from_name
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+# Prevent HuggingFace tokenizer deadlocks under multiprocessing (per official examples).
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 
 # ---------------------------------------------------------------------------
 # Cosmos imports (heavy; not available before setup.sh)
@@ -176,6 +179,12 @@ class PipelineFactory:
 
     def _build(self, profile: GenerationProfile):
         import torch
+
+        # Match official examples: maximize throughput and numerical stability.
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cuda.matmul.allow_tf32 = True
 
         cosmos = self.cosmos
         # 1. build the LazyConfig
@@ -383,11 +392,15 @@ def main() -> None:
                     help="Dir of conditioning images keyed by task name. Repeat for multiple.")
     ap.add_argument("--ckpt_root", default=SCRIPT_DIR / "checkpoints", type=Path,
                     help="Dir holding nvidia/Cosmos-Predict2-* and google-t5/t5-11b.")
-    ap.add_argument("--seed_offset", type=int, default=1000,
-                    help="seed = seed_offset + prompt_index (default: 1000)")
     ap.add_argument("--profile", default="high", choices=["high", "gr00t"],
                     help="Generation profile: 'high' (base 14B) or 'gr00t' (GR1 fine-tune)")
+    ap.add_argument("--seed_offset", type=int, default=None,
+                    help="seed = seed_offset + prompt_index (default: profile.base_seed)")
     args = ap.parse_args()
+
+    profile = from_name(args.profile)
+    if args.seed_offset is None:
+        args.seed_offset = profile.base_seed
 
     prompts = json.loads(args.prompts.read_text())
     if not isinstance(prompts, list) or not all("task" in p and "prompt" in p for p in prompts):
@@ -399,7 +412,6 @@ def main() -> None:
     if fallback is not None:
         print(f"[generate] fallback conditioning frame: {fallback}")
 
-    profile = from_name(args.profile)
     factory = PipelineFactory(args.ckpt_root)
     BulkGenerator(factory, profile, args.save_dir, input_dirs, fallback).run(
         prompts, seed_offset=args.seed_offset
