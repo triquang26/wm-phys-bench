@@ -1,29 +1,46 @@
-# Conda environment for warp-score hallucination detection.
+# Conda environment spec for warp-score hallucination detection.
 #
-# NOTE: torch + CUDA must be installed separately to match your CUDA version.
-# Example (CUDA 12.1):
+# Quickest setup on a new machine:
+#   bash scripts/setup_env.sh          # auto-detects CUDA, installs everything
+#
+# Manual setup (if you prefer):
+#   conda env create -f environment.yml
 #   conda activate warp-score
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121  # adjust cu version
+#   export PYTHONPATH=$(pwd)/third_party/RoMaV2/src:$PYTHONPATH
 #
-# On this machine the `groot` conda env already has the right torch/CUDA combo;
-# activate it and run `pip install -e .` instead of creating this env from scratch.
+# Tested configuration on this machine (worker-0):
+#   Python 3.10, torch 2.5.1+cu121, CUDA driver 12.1, H100 80GB
 
 name: warp-score
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
   - defaults
 dependencies:
   - python=3.10
   - pip
   - pip:
-    - -e .
+    # --- core ---
+    - numpy>=2.0
     - scipy>=1.11
     - opencv-python-headless>=4.8
     - tqdm>=4.65
     - pyyaml>=6.0
     - matplotlib>=3.7
     - scikit-learn>=1.3
-    - transformers>=4.40   # for SAM3
-    - Pillow>=10.0
+    - Pillow>=12.0
+    # --- matching / features ---
+    - einops>=0.8.1          # required by RoMaV2
+    - rich>=14.0              # required by RoMaV2
+    # --- SAM3 background removal ---
+    - transformers>=5.0       # provides Sam3Processor + Sam3Model
+    - huggingface_hub>=1.0    # model downloads
+    # --- warp_score package (editable install) ---
+    - -e .
+    # NOTE: torch + torchvision are NOT listed here because the correct
+    # wheel depends on your CUDA version. Install separately:
+    #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    #
+    # NOTE: RoMaV2 must be installed separately from third_party/:
+    #   pip install -e third_party/RoMaV2
+    # Or just set PYTHONPATH=$(pwd)/third_party/RoMaV2/src
