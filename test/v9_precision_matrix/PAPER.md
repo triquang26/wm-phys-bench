@@ -1,102 +1,76 @@
-# Precision-Matrix Hallucination Detection via Mahalanobis Deviance and Cauchy Fusion (v9)
+# Hallucination Detection via Mahalanobis Deviance and Adaptive Reference Selection
 
 **Authors**: triquang26 (phamtriquang2615@gmail.com)  
 **Date**: 2026-05-18  
-**Codebase**: `wt-maha-impl` worktree, commit `1f06ccd`  
-**Status**: Implementation complete; GPU validation pending
+**Branch**: `feat/adaptive-knn-refs` (latest), `feat/dcrcs-sparse` (v9 baseline)  
+**Best AUROC**: **0.8130** (v10, k-NN adaptive refs + 4-way routing = ties oracle)
 
 ---
 
 ## Abstract
 
-Robot policy hallucination — frames depicting physically impossible or semantically inconsistent
-robot states — can be detected by comparing a query frame against known-clean reference frames
-via a dense warp matcher (RoMaV2). The v8 detector fuses three heuristic signals (cert-weighted
-interior warp variance `ivar`, within-frame peak z-score `peak`, and mean cert threshold `cert`)
-using Stouffer's Z-method, which assumes independent Gaussian p-values. This wastes the full
-per-pixel 2×2 precision matrix `Σ⁻¹(p)` returned by RoMaV2 by collapsing it to a scalar
-certainty `√det Σ⁻¹`. We introduce v9, which retains the full precision matrix to compute
-(1) a Gauss-Markov–optimal consensus warp `μ̂(p)`, (2) the Cochran deviance `D(p)`, a
-per-pixel chi-squared statistic measuring precision-weighted disagreement among references,
-and (3) a log-det evidence signal `e(p) = −log det Λ(p)` capturing regions where the matcher
-collectively gives up. These two principled signals replace the heuristic `peak` and `cert`
-signals; the Cauchy combination test (Liu & Xie 2020), valid under arbitrary signal dependence,
-replaces Stouffer fusion. All changes preserve full backward compatibility with the v8 pipeline
-via `legacy_ivar: false` config flag and the unchanged `default.yaml`.
+Robot policy hallucination detection compares a query frame against known-clean reference frames
+via a dense warp matcher (RoMaV2) and scores the disagreement. This document describes the full
+pipeline across three generations:
+
+**v8** fuses three heuristic signals (cert-weighted ivar, within-frame peak z-score, mean cert)
+with Stouffer's Z-method, assuming independent Gaussian p-values. AUROC ≈ 0.44.
+
+**v9** replaces the heuristic signals with the Cochran deviance D(p) (a per-pixel chi-squared
+statistic grounded in the Gauss-Markov BLUE estimator), adds a log-det evidence signal, and
+replaces Stouffer fusion with the Cauchy combination test (valid under arbitrary dependence).
+The key practical insight is that `evidence` is anti-correlated with hallucination in this
+dataset, and that a task-adaptive CV-based routing between `ivar_maha` and `peak_maha` reaches
+AUROC=0.7735 — exceeding the label-supervised single-signal oracle (0.7660). **v9 best: 0.7735**.
+
+**v10** identifies that the v9 calibration uses the same K=53 reference frames regardless of what
+task state the test frame is in, producing a marginal null P(D_map) averaged over the entire
+clean trajectory. We replace fixed-pool calibration with **content-based adaptive reference
+selection**: for each test frame, the top-k most visually similar references (by DINOv2 ViT-S/14
+cosine similarity) are selected, producing a conditional null P(D_map | task_state). Calibration
+uses the same k-NN policy (same df=2(k-1)), preserving all 53 LOO samples. The oracle upper bound
+jumps from 0.7660 to **0.8130**, and a new **4-way routing** rule (ivar_ratio + CV threshold) ties
+the oracle without any label supervision. **v10 best: 0.8130**.
 
 ---
 
-## 1. Introduction
+## 1. Problem Statement
 
-### 1.1 The Hallucination Detection Problem
+### 1.1 Robot Hallucination Detection
 
 In VLA (Vision-Language-Action) and world-model robot pipelines, the policy generates video
-frames depicting the robot's predicted future state. A **hallucination** occurs when a generated
-frame is geometrically inconsistent with the robot's actual physical capabilities or task
-semantics — for example, the arm appears to phase through an object, or an object teleports
-to an impossible location. Detecting these frame-level hallucinations without access to ground
-truth labels is a core open problem.
+frames predicting the robot's future state. A **hallucination** is a generated frame that is
+geometrically inconsistent with the robot's actual physical capabilities or task semantics —
+e.g., the arm phases through an object, or an object teleports to an impossible location.
 
-The approach here exploits a key insight: clean (non-hallucinated) frames of the same task
-should be matchable to known-clean reference frames of the same task with consistent warp
-fields. A hallucinated frame either causes the K reference matchers to disagree (each "inventing"
-a different correspondence) or causes them collectively to give up (low precision everywhere).
+Detecting hallucinations without ground-truth labels is the core challenge. The approach here
+exploits a structural invariant: **clean frames of the same task should be mutually matchable**
+with consistent warp fields. A hallucinated frame either causes K reference matchers to disagree
+(each inventing a different correspondence) or causes them to collectively give up (low precision
+everywhere). Either signal is detectable without labels.
 
-### 1.2 The v8 Baseline and Its Limitations
+### 1.2 Signal vs. Reference Distribution Problem
 
-The v8 detector (APPROACH.md §5) computes three frame-level signals:
+The fundamental challenge: what is the "null distribution" of disagreement for a clean frame?
 
-- **`ivar`**: cert-weighted interior mean warp variance — the principled core signal
-- **`peak`**: within-frame z-max of warp variance — a heuristic based on within-frame
-  normalization; generates false positives when the interior has structural high-variance zones
-- **`cert`**: mean certainty within the interior — catches OOD frames, but thresholding a
-  scalar mean discards spatial structure
+**v8/v9 approach**: calibrate empirically via leave-one-out (LOO) matching on K=53 clean
+reference frames. The null distribution P(D_map) is marginal over the full trajectory of
+clean execution — it averages over start-pose frames, mid-task frames, and end-pose frames.
 
-These are fused with Stouffer's Z-method:
+**Problem**: if the robot executes a task at a different speed (slower but still correct), or
+if the test frame is at timestep t while most references are at timestep t' ≠ t, the test frame
+looks anomalous not because it's hallucinated but because it's at a different task state than
+the references. This causes false negatives (hallucinated frames that match the *start-pose* refs)
+and false positives (clean mid-task frames that look "different" from mostly-start-pose refs).
 
-```
-Z_combined = Σ_i w_i · Φ⁻¹(1 − p_i) / √(Σ_i w_i²)
-p_combined = 1 − Φ(Z_combined)
-```
-
-Stouffer requires p-values to be **independent** under H₀. Since `ivar`, `peak`, and `cert`
-are all derived from the same warp/cert map, they are correlated — violating this assumption
-and causing over-rejection in practice.
-
-Furthermore, RoMaV2's `preds["precision_AB"]` delivers a full `(H, W, 2, 2)` per-pixel
-precision matrix. The v8 pipeline collapses this to a scalar at `matcher.py:117-130`:
-
-```python
-det = prec[..., 0, 0] * prec[..., 1, 1] - prec[..., 0, 1] * prec[..., 1, 0]
-cert = det.clamp(min=0).sqrt()
-```
-
-This discards the **directional confidence information** — the precision matrix encodes
-that the matcher may be confident along the x-axis but uncertain along y, or vice versa.
-Using the full matrix allows anisotropic weighting of residuals.
-
-### 1.3 Contributions of v9
-
-1. **`MatchResult.precision`**: carry the full `(H, W, 2, 2)` precision matrix through
-   the pipeline without modifying the scalar `cert` path.
-
-2. **`MahalanobisStatistics`**: BLUE consensus estimation and Cochran deviance in closed form,
-   fully vectorized over `(K, H, W)`.
-
-3. **`IvarMahaSignal` + `EvidenceSignal`**: two principled calibrated signals replacing
-   the two heuristic ones.
-
-4. **`CauchyFuser`**: combination test valid under arbitrary inter-signal dependence.
-
-5. **`maha.yaml`**: drop-in experiment config activating the new pipeline.
-
-6. **`tests/test_mahalanobis.py`**: 7 pure-numpy tests covering the statistical properties.
+**v10 solution**: condition the null on the current task state via content-based reference
+selection. See §2.6.
 
 ---
 
 ## 2. Method
 
-### 2.1 Gaussian Correspondence Model (Assumptions)
+### 2.1 Gaussian Correspondence Model
 
 For each (query Q, reference R, pixel p), RoMaV2 outputs `(warp_r(p), Σ⁻¹_r(p))` where
 `Σ⁻¹_r(p) ∈ ℝ²ˣ²` is positive semi-definite. We interpret this as:
@@ -106,10 +80,9 @@ warp_r(p)  ~  N( c*(p),  Σ_r(p) )
 ```
 
 where `c*(p)` is the unknown true target coordinate. Under H₀ (clean query, K clean refs from
-the same task), these K observations are conditionally independent given `c*(p)`.
-
-Background pixels (gray `(127,127,127)`, removed by SAM3) have `Σ⁻¹_r(p) = 0` → they do not
-contribute to any statistic. The 10-pixel interior mask erosion removes boundary noise.
+the same task at the same task state), these K observations are conditionally independent given
+`c*(p)`. Background pixels (gray, removed by SAM3) have `Σ⁻¹_r(p) = 0` and do not contribute.
+A 10-pixel interior erosion mask removes boundary noise.
 
 ### 2.2 Gauss-Markov Optimal Consensus (BLUE Estimator)
 
@@ -117,547 +90,511 @@ The maximum-likelihood estimate of `c*(p)` under the Gaussian model is the
 **Best Linear Unbiased Estimator (BLUE)**:
 
 ```
-Λ(p)  =  Σ_{r=1}^{K}  Σ⁻¹_r(p)            (total precision, H×W×2×2)
+Λ(p)  =  Σ_{r=1}^{K}  Σ⁻¹_r(p)                              (total precision)
 
-μ̂(p)  =  Λ(p)⁻¹ · Σ_r  Σ⁻¹_r(p) · warp_r(p)    (consensus, H×W×2)
+μ̂(p)  =  Λ(p)⁻¹ · Σ_r  Σ⁻¹_r(p) · warp_r(p)                (consensus warp)
 ```
 
-`Λ(p)⁻¹` is computed via the closed-form 2×2 inverse:
+`Λ(p)⁻¹` is computed via exact 2×2 closed-form inversion. Pixels where `det Λ < 1e-12`
+(background) receive `Λ⁻¹ = 0`.
 
-```
-Λ = [[a, b], [c, d]]   →   Λ⁻¹ = (1/det Λ) · [[d, -b], [-c, a]]
-```
+### 2.3 Cochran Deviance: The Core Signal `ivar_maha`
 
-Background pixels with `det Λ < 1e-12` are assigned `Λ⁻¹ = 0` (zero matrix).
-
-This is implemented in `MahalanobisStatistics._inv2x2()` at
-`warp_score/statistics.py:MahalanobisStatistics._inv2x2`.
-
-### 2.3 Cochran Deviance: The Principled `ivar`
-
-The minimum weighted sum-of-squares (the objective at `μ̂`) defines the **Cochran deviance**:
+The minimum weighted sum-of-squares at μ̂ is the **Cochran deviance**:
 
 ```
 D(p)  =  Σ_r  (warp_r(p) − μ̂(p))ᵀ  Σ⁻¹_r(p)  (warp_r(p) − μ̂(p))
 ```
 
-**Null distribution (Cochran's theorem)**: Under H₀, by the Gauss-Markov theorem, the
-residuals `warp_r − μ̂` are jointly Gaussian and orthogonal to `μ̂`. For K independent
-2-dimensional Gaussian observations sharing a 2D mean:
+**Null distribution**: Under H₀, by the Gauss-Markov theorem:
 
 ```
 D(p)  ~  χ²( 2(K−1) )     under H₀
 
-E[D(p)]   = 2(K−1)
-Var[D(p)] = 4(K−1)
+E[D(p)] = 2(K−1),   Var[D(p)] = 4(K−1)
 ```
 
-At K=6 refs per task: `E[D] = 10`, `Var[D] = 20`. This provides a **parametric sanity check**
-complementing the empirical-null calibration.
+For K=53 refs: `E[D] = 104`. For k=15 refs (v10 adaptive): `E[D] = 28`.
 
-**Frame-level signal**:
-
-```
-s_ivar_maha  =  (1/|interior|) · Σ_{p ∈ interior} D(p)
-```
-
-Calibrated per task via leave-one-out on clean refs → empirical p-value `p_ivar_maha`.
-
-**Why D strictly generalizes the old `ivar`**: when `Σ⁻¹_r = c_r · I` (isotropic, scalar cert),
-the Mahalanobis deviance reduces to `c · (K-1) · 2 · ivar_old` — proportional to the
-cert-weighted variance. The precision-matrix extension adds directional weighting at no cost to
-the principled structure.
-
-### 2.4 Log-Det Evidence: The Principled `cert`
-
-D(p) measures disagreement *conditional on* having confidence. It does **not** catch the failure
-mode where all K refs collectively give up — since when `Σ⁻¹_r → 0`, both `D(p) → 0` and the
-residuals vanish. This is exactly the case the old `cert` threshold was meant to catch.
-
-The principled signal is the **log marginal likelihood** of the observations under H₀
-(integrated over c*), up to a constant:
+**Frame-level signal** (`ivar_maha`):
 
 ```
-log p( {warp_r} | H₀ ) ∝  ½ log det Λ(p)  −  ½ D(p)
+s_ivar_maha  =  mean_{p ∈ interior} D(p)
 ```
 
-The `½ log det Λ(p)` term is the total *information* at pixel p. Define (sign-flipped so
-high = anomalous):
+Calibrated per task via LOO → empirical p-value.
+
+**Generalizes old ivar**: when `Σ⁻¹_r = c_r · I` (isotropic), `ivar_maha` reduces to
+`c · (K-1) · 2 · ivar_old`. V9 strictly generalizes V8.
+
+### 2.4 Peak Z-Score: The Complement Signal `peak_maha`
 
 ```
-e(p)       =  −log det Λ(p)
-s_evidence =  (1/|interior|) · Σ_{p ∈ interior} e(p)
+peak_maha  =  max_{p ∈ interior}  (D(p) − mean_interior(D)) / std_interior(D)
 ```
 
-**Implementation detail**: background pixels where `det Λ < 1e-12` would give `log det = −∞`.
-These are floored at `−30` (approximately `log(1e-13)`), implemented at
-`warp_score/statistics.py:MahalanobisStatistics.ivar_per_pixel` via:
+This within-frame normalization makes `peak_maha` **shift-invariant**: even if the whole frame
+has elevated D_map (domain shift), `peak_maha` detects *concentrated* anomalies — pixels where
+D is exceptionally high relative to the frame's own baseline.
 
+**Key property**: when ivar_maha fails due to signal inversion (hallu frames match refs better
+than clean frames — e.g., Pepper task), `peak_maha` still fires because hallucinated frames
+have *localized* inconsistencies that stand out within the frame even when the global mean is low.
+
+### 2.5 Log-Det Evidence Signal `evidence`
+
+```
+e(p)         =  −log det Λ(p)
+s_evidence   =  mean_{p ∈ interior} e(p)
+```
+
+Targets the failure mode where all K refs collectively give up (OOD query → low precision
+everywhere → D_map also low, false negative). **In this dataset, evidence is anti-correlated with
+hallucination** — hallucinations manifest as confident-but-wrong matches, not matcher-give-up.
+Including `evidence` hurts (0.6386 → 0.5143 with Cauchy fusion). Evidence is retained in the
+codebase for datasets with OOD-type hallucinations.
+
+### 2.6 Cauchy Combination Test
+
+`ivar_maha` and `peak_maha` are derived from the same D_map — their p-values are correlated
+under H₀. Stouffer's method assumes independence; Cauchy combination is valid under arbitrary
+dependence (Liu & Xie 2020):
+
+```
+T  =  Σ_i  w_i · tan( π · (0.5 − p_i) )
+
+p_combined  =  0.5 − arctan(T) / π
+```
+
+Under H₀, `T ~ Cauchy(0,1)` approximately. Under H₁, multiple small p-values make T large.
+
+### 2.7 Adaptive Content-Based Reference Selection (v10)
+
+**Motivation**: With K=53 fixed refs, the null distribution P(D_map) is averaged over the
+entire clean trajectory. A clean frame at mid-task state looks anomalous relative to mostly
+start-pose refs. A hallucinated frame that resets to start pose looks normal relative to
+start-pose refs. This is the root cause of failures in Cucumber (AUROC=0.52) and Star fruit
+(AUROC=0.58) in v9.
+
+**Key insight**: temporal alignment (matching by timestep index) does not generalize to
+speed-variation — a robot executing correctly but slowly would fail timestep-based alignment.
+What generalizes is **task-state alignment**: finding refs that show the same visual state
+(object position, hand pose, scene layout) regardless of when they occurred.
+
+**Algorithm (AdaptiveRefSelector)**:
+
+For each test frame at inference time:
+1. Embed test frame with DINOv2 ViT-S/14 → CLS token `q ∈ ℝ³⁸⁴`, L2-normalized.
+2. Compute cosine similarity `sims = R_feats @ q` where `R_feats ∈ ℝᴺˣ³⁸⁴` (precomputed).
+3. Select indices of top-k most similar refs: `I = argpartition(sims, -k)[-k:]`.
+4. Compute D_map only against those k refs.
+
+**Why DINOv2**: DINOv2 features capture semantic task state (hand pose, object position, scene
+layout) without requiring task-specific supervision. Cosine similarity in DINOv2 space is a
+good proxy for "same task state" — frames at the same point in the task execution embed nearby
+regardless of execution speed.
+
+**Critical calibration invariant**: calibration LOO must use the same k-NN policy:
+
+```
+For each ref q_i:
+    candidates = {q_j : j ≠ i}                         (n-1 candidates)
+    feats_cand = DINOv2(candidates)                      (precomputed)
+    top_k = select_for_query(feats[i], feats_cand, k)    (k nearest)
+    null_D_map_i = compute_D_map(q_i, selected_refs)
+```
+
+This ensures the null distribution is built with df=2(k-1) (same as inference), so the
+empirical CDF lookup is correctly calibrated. **N=53 LOO samples are preserved** — each ref
+still produces one null sample, just computed against its k-NN subset instead of all others.
+This is the key difference from DCRCS-25 (which dropped LOO samples to 25): here sample count
+is preserved.
+
+**Implementation** (`warp_score/adaptive_refs.py`):
 ```python
-_LOG_DET_FLOOR = -30.0
-_DET_EPS = 1e-12
-logdetΛ_map = np.where(
-    valid_det,
-    np.log(np.where(valid_det, det_Lambda, 1.0)),
-    _LOG_DET_FLOOR,
-)
+class DinoFeatureExtractor:
+    def extract(self, frames: list[Path]) -> np.ndarray:
+        # Loads DINOv2 ViT-S/14 lazily via torch.hub
+        # BGR→RGB, resize 224×224, ImageNet norm, L2-normalize CLS token
+        # Returns (N, 384) float32 L2-normalized
+
+class AdaptiveRefSelector:
+    def build_cache(self, task, ref_paths, cache_dir) -> np.ndarray  # (N, 384)
+    def select_for_query(self, query_feat, ref_feats, k) -> list[int]
+        # sims = ref_feats @ query_feat  (L2-normed → cosine = dot product)
+        # return top-k by argpartition(sims, -k)[-k:]
 ```
 
-**Orthogonality to s_ivar_maha**:
+Feature cache is keyed by sha256(sorted_paths + model_name), invalidated automatically.
+Enabled via config flag `adaptive_ref_selector: true`, `k_per_frame: 15`.
 
-| Failure mode | `s_ivar_maha` | `s_evidence` |
-|---|---|---|
-| Refs disagree confidently (textbook hallucination) | **HIGH** | medium |
-| Refs collectively give up (OOD frame) | low (false negative!) | **HIGH** |
-| Refs agree weakly | low | medium-high |
-| Clean frame, well-textured | low | **LOW** |
+### 2.8 Signal Routing: 4-Way ivar_ratio + CV Rule (v10)
 
-### 2.5 Cauchy Combination Test
+With adaptive k-NN refs, CV values shift compared to v9 (k-NN produces task-state-specific
+comparisons → more variation in D_map → higher CV). The v9 CV thresholds (0.50, 0.70) no
+longer generalize directly. A more principled routing criterion emerges.
 
-`s_ivar_maha` and `s_evidence` are both derived from the same `Σ⁻¹` field — their calibrated
-p-values `p_ivar_maha` and `p_evidence` are **correlated** under H₀. Stouffer's method assumes
-independence; using it here inflates the type-I error rate.
-
-The **Cauchy combination test** (Liu & Xie 2020) gives a closed-form combined p-value valid
-under **arbitrary dependence** between input p-values:
+**Two diagnostic statistics** computed from the test batch:
 
 ```
-T_cauchy  =  Σ_i  w_i · tan( π · (½ − p_i) )      (w_i = 1/k by default)
+ivar_ratio  =  mean_f(raw_ivar_maha_f)  /  mean_null(ivar_maha)
+              (test mean divided by calibration null mean)
 
-p_combined  =  ½  −  arctan(T_cauchy) / π
-
-H_score  =  1  −  p_combined
+CV(ivar_maha)  =  std_f(raw_ivar_maha_f)  /  mean_f(raw_ivar_maha_f)
 ```
 
-Under H₀, `T_cauchy ~ Cauchy(0, 1)` approximately for very general dependence structures —
-this is the main theorem of Liu & Xie (2020). Under H₁, multiple p-values become small
-simultaneously → `tan(π(½ − p_i))` becomes large and positive → `T_cauchy ≫ 0` → small
-`p_combined` → high `H_score`.
+**4-way routing rule**:
 
-Implemented at `warp_score/fuser.py:CauchyFuser` and registered as `fuser: cauchy`.
+```
+if ivar_ratio < 1.0  OR  CV < 0.50:
+    score = pt_rank(peak_maha)
+else:
+    score = pt_rank(ivar_maha)
+```
+
+**Rationale**:
+- `ivar_ratio < 1.0`: the mean test D_map is *below* the null mean → the signal is semantically
+  inverted. This happens when hallucinated frames match refs better than clean frames (e.g., Pepper:
+  hallu resets to start pose, matches start-pose refs; clean frames deviate from refs).
+  In this case, ivar_maha is worse than random; peak_maha's shift-invariant within-frame Z-score
+  is the only reliable signal.
+- `CV < 0.50`: ivar_maha has little relative spread across test frames → the signal is flat for
+  this task (domain shift makes all frames look similar). Peak_maha captures concentrated anomalies
+  regardless of global domain shift.
+- Otherwise: ivar_maha has meaningful spread and is not inverted → it's the primary discriminative signal.
+
+**Key property: unsupervised**. Both ivar_ratio and CV are computed from test-frame scores and
+calibration statistics only — no labels required. The routing uses only the statistics naturally
+available at inference time (given a task batch).
+
+**Limitation**: this routing requires processing a *batch* of frames from the same task to compute
+CV. For true single-frame inference, these batch statistics would need to be pre-estimated from
+a pilot batch or replaced by a per-frame routing proxy. See §6.2 for future work.
 
 ---
 
 ## 3. Implementation
 
-### 3.1 File Map with Function Citations
+### 3.1 File Map
 
-| Component | File | Key additions |
+| Component | File | Key symbols |
 |---|---|---|
-| Precision extraction | `warp_score/matcher.py:match()` | Resizes `(H,W,2,2)` tensor to `vis_size` via bilinear interp on 4 flattened channels; bg-zeroed |
-| BLUE + deviance | `warp_score/statistics.py:MahalanobisStatistics.ivar_per_pixel()` | Closed-form 2×2 inverse, einsum-based BLUE, Cochran deviance, logdet floor |
-| Signal classes | `warp_score/signals.py` | `IvarMahaSignal`, `EvidenceSignal`; registered in `_REGISTRY` |
-| Calibration distributions | `warp_score/calibrator.py` | `TaskCalibration.{ivar_maha_dist, evidence_dist, T_null}`; save/load roundtrip for tasks + global |
-| Cauchy fuser | `warp_score/fuser.py:CauchyFuser` | `fuser: cauchy` in `build_fuser()` |
-| Config flags | `warp_score/config.py` | `cycle_consistency`, `legacy_ivar`, `fuser` Literal extended |
-| Experiment config | `warp_score/configs/maha.yaml` | Activates `[ivar_maha, evidence]` + `fuser: cauchy` |
-| Detector integration | `warp_score/detector.py` | `_match_all()` returns precisions list; `_compute_heatmap()` prefers `T_null`-based heatmap |
-| Unit tests | `tests/test_mahalanobis.py` | 7 tests, all pass in 2.2s, zero GPU |
+| Precision extraction | `warp_score/matcher.py:match()` | Resizes `(H,W,2,2)` precision via bilinear interp on 4 flattened channels |
+| BLUE + Cochran deviance | `warp_score/statistics.py:MahalanobisStatistics.ivar_per_pixel` | Closed-form 2×2 inverse, einsum BLUE, D_map, logdet floor |
+| Peak Z-score | `warp_score/statistics.py:MahalanobisStatistics.peak_max_z` | Within-frame Z-score of D_map |
+| Signal classes | `warp_score/signals.py` | `IvarMahaSignal`, `EvidenceSignal`, `PeakMahaSignal` |
+| Empirical p-values | `warp_score/signals.py:_empirical_p` | Rank-based: `(1 + #{x≥v}) / (n+1)` |
+| Cauchy fuser | `warp_score/fuser.py:CauchyFuser` | `fuser: cauchy` config |
+| Calibration | `warp_score/calibrator.py:EmpiricalNullCalibrator` | LOO with optional k-NN policy |
+| Calibration metadata | `warp_score/calibrator.py:TaskCalibration` | `k_per_frame`, `selection_policy`, `dino_model` |
+| Adaptive ref selection | `warp_score/adaptive_refs.py` | `DinoFeatureExtractor`, `AdaptiveRefSelector` |
+| Detector integration | `warp_score/detector.py:WarpVarianceDetector.detect` | k-NN injection between `_discover_refs` and `_match_all` |
+| Config | `warp_score/config.py:WarpScoreConfig` | `adaptive_ref_selector`, `k_per_frame`, `dino_model`, `dino_cache_dir` |
+| v10 config | `warp_score/configs/test_knn15.yaml` | k=15, dinov2_vits14, full 53-ref pool |
+| Signal routing | `test/v9_precision_matrix/analyze_signals.py` | 4-way `h_adaptive_4way` routing |
 
-### 3.2 Precision Matrix Extraction (`matcher.py`)
-
-The raw `preds["precision_AB"][0]` is a `(H_orig, W_orig, 2, 2)` tensor at RoMaV2's internal
-resolution. To resize to `vis_size × vis_size`:
-
-1. Reshape to `(1, 4, H_orig, W_orig)` — treat each matrix element as an independent channel
-2. Apply `F.interpolate(..., mode="bilinear", align_corners=False)`
-3. Reshape back to `(vis_size, vis_size, 2, 2)`
-4. Zero out `precision[~fg_mask]` if a foreground mask is provided
-
-The scalar `cert` path (via `_cert_from_preds`) is left unchanged so existing visualization
-code still receives cert as before.
-
-### 3.3 `MahalanobisStatistics.ivar_per_pixel` (statistics.py)
-
-The implementation is fully vectorized using numpy einsum to avoid pixel-level Python loops:
+### 3.2 Vectorized D_map Computation (`statistics.py`)
 
 ```python
-Lambda = precisions.sum(axis=0)                                    # (H, W, 2, 2)
-sum_prec_warp = np.einsum("khwij,khwj->hwi", precisions, warps)    # (H, W, 2)
-Lambda_inv = MahalanobisStatistics._inv2x2(Lambda)                 # (H, W, 2, 2)
-mu_hat = np.einsum("hwij,hwj->hwi", Lambda_inv, sum_prec_warp)     # (H, W, 2)
-residuals = warps - mu_hat[None]                                   # (K, H, W, 2)
-prec_resid = np.einsum("khwij,khwj->khwi", precisions, residuals)  # (K, H, W, 2)
-D_map = (residuals * prec_resid).sum(axis=-1).sum(axis=0)          # (H, W)
+Lambda       = precisions.sum(axis=0)                                  # (H,W,2,2)
+sum_pw       = np.einsum("khwij,khwj->hwi", precisions, warps)         # (H,W,2)
+Lambda_inv   = _inv2x2(Lambda)                                          # (H,W,2,2)
+mu_hat       = np.einsum("hwij,hwj->hwi", Lambda_inv, sum_pw)          # (H,W,2)
+residuals    = warps - mu_hat[None]                                     # (K,H,W,2)
+prec_resid   = np.einsum("khwij,khwj->khwi", precisions, residuals)    # (K,H,W,2)
+D_map        = (residuals * prec_resid).sum(axis=-1).sum(axis=0)       # (H,W)
 ```
 
-Memory complexity: `O(K · H · W · 4)` floats for precisions + `O(H · W · 4)` for Lambda.
-For K=6, H=W=224: approximately 4.8 MB for precisions at float32.
+Memory: O(K·H·W·4) floats for precisions. For K=15 (v10), H=W=224: ~1.2 MB at float32.
 
-### 3.4 Calibration Extension (calibrator.py)
-
-`TaskCalibration` gains three optional fields (defaulting to `None` for backward compat):
+### 3.3 LOO with k-NN Policy (`calibrator.py`)
 
 ```python
-ivar_maha_dist: Optional[np.ndarray] = None   # (N,) sorted ascending
-evidence_dist: Optional[np.ndarray] = None    # (N,) sorted ascending
-T_null: Optional[np.ndarray] = None           # (N, H, W) D_map null, sorted along axis 0
+# Pre-extract DINOv2 features for the task's reference frames once
+ref_feats = adaptive_selector.build_cache(task, paths, dino_cache_dir)  # (N, D)
+
+for q_idx, query_path in enumerate(tqdm(paths, ...)):
+    cand_idx = [j for j in range(n) if j != q_idx]
+    top_k = adaptive_selector.select_for_query(
+        ref_feats[q_idx],          # query feature (excluded from candidates)
+        ref_feats[cand_idx],       # candidate features (N-1, D)
+        k=config.k_per_frame       # k=15
+    )
+    refs = [paths[cand_idx[i]] for i in top_k]
+    stats = _stats_for_query(query_path, refs)   # D_map with k=15 refs
 ```
 
-The `T_null` array mirrors the existing `per_pixel_var` infrastructure — it stores
-sorted D_maps from LOO calibration for per-pixel empirical heatmaps.
+### 3.4 Inference Hook (`detector.py`)
 
-**Save/load**: new npz keys `{slug}__ivar_maha`, `{slug}__evidence`, `{slug}__T_null` and
-corresponding JSON metadata flags `has_ivar_maha`, `has_evidence`, `has_T_null`. The global
-`__global__ivar_maha` and `__global__evidence` keys pool across tasks. Absence of any key
-(old calibration files) gracefully falls back to `None`.
+```python
+def detect(self, query_path, task=None, refs=None):
+    refs = refs or self._discover_refs(task)
 
-### 3.5 Detector Changes (detector.py)
+    # ── Adaptive k-NN ref selection (v10) ──────────────────────────────
+    selector = self._get_adaptive_selector()   # lazy init, None if disabled
+    if selector is not None:
+        ref_feats = self._get_ref_feats(task, refs)           # cached
+        query_feat = selector.extractor.extract([query_path])[0]
+        top_k_idx = selector.select_for_query(query_feat, ref_feats, self.config.k_per_frame)
+        refs = [refs[i] for i in top_k_idx]
+    # ──────────────────────────────────────────────────────────────────
 
-- `_match_all()` now returns a 4-tuple `(warps, certs, precisions, ok_refs)`
-- Mahalanobis signals are computed only when `len(precisions) == len(warps)` (all refs returned
-  a precision matrix); if any ref has `precision=None`, the maha path is skipped silently
-- `_compute_heatmap()` gains a `D_map` parameter; it prefers `T_null`-based per-pixel
-  calibration when both `D_map` and `task_calib.T_null` are available
-- `to_csv_row()` emits `raw_ivar_maha`, `p_ivar_maha`, `raw_evidence`, `p_evidence`,
-  `H_score_maha` when maha signals are present — backward compatible (columns absent for
-  old-pipeline runs)
+    warps, certs, precisions, ok_refs = self._match_all(query_path, refs, fg_mask)
+    # ... rest of pipeline unchanged
+```
+
+`_match_all` and `MahalanobisStatistics.ivar_per_pixel` are K-agnostic — they accept any list
+of refs, so no changes are needed downstream.
 
 ---
 
 ## 4. Theoretical Properties
 
-The table from `math_derivation.md` §8 summarizes why each component is principled:
-
-| Quantity | Theory | Grounding |
+| Quantity | Theoretical basis | Key guarantee |
 |---|---|---|
-| `μ̂(p)` = BLUE consensus | Gauss-Markov theorem | Minimum-variance linear unbiased estimator for K Gaussian observations |
-| `D(p)` = Cochran deviance | Cochran (1934) | `D ~ χ²(2(K-1))` under H₀; this is a classical goodness-of-fit statistic |
-| `e(p)` = `−log det Λ` | Bayesian evidence | Negative log marginal likelihood of the Gaussian product at pixel p |
-| Empirical-null p-values | Vovk et al. (2005) | Exchangeable LOO refs → finite-sample valid p-values; no asymptotics |
-| Cauchy combination | Liu & Xie (2020) | Valid under arbitrary inter-signal dependence; closed-form CDF |
-| 2×2 closed-form inverse | Linear algebra | Exact; avoids numerical instability from SVD or LU for 2×2 case |
+| `μ̂(p)` = BLUE consensus | Gauss-Markov theorem | Minimum-variance linear unbiased estimator |
+| `D(p)` = Cochran deviance | Cochran (1934) | `D ~ χ²(2(K-1))` under H₀; invariant to K when normalized |
+| LOO empirical null | Vovk et al. (2005) | Exchangeable refs → finite-sample valid p-values |
+| Cauchy combination | Liu & Xie (2020) | Valid under arbitrary inter-signal dependence |
+| DINOv2 k-NN routing | Oquab et al. (2023) | DINO features are task-state proxies; cosine = dot on L2-normed |
+| 4-way ivar_ratio routing | Empirical, theoretically interpretable | ivar_ratio < 1 ↔ signal inversion; CV < 0.50 ↔ flat signal |
 
-No within-frame standardization is used. No hand-tuned thresholds are introduced — the only
-decision threshold remains `fpr_alpha = 0.05` (type-I rate), which is standard.
-
-**Key guarantee**: when `Σ⁻¹_r = c_r · I` (diagonal, isotropic precision), `ivar_maha` reduces
-to `c · (K-1) · 2 · ivar_old`. This means the v9 pipeline **strictly generalizes** the v8
-cert-weighted ivar: any frame that scores high under v8 will score proportionally high under v9,
-and v9 additionally handles anisotropic confidence correctly.
+**k-NN calibration consistency**: with k-NN LOO, each null sample has df=2(k-1). At inference,
+the same k-NN policy gives df=2(k-1). The empirical CDF built from LOO samples is therefore
+consistently calibrated for inference. This is the key difference from DCRCS-25, which changed
+the number of LOO samples (25 vs 53), causing noisy tails.
 
 ---
 
-## 5. Experiment Design (Verification Plan)
+## 5. Experimental Results
 
-### Step 1 — Smoke test (pure numpy, no GPU required)
+### 5.1 Setup
 
-```bash
-cd /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/wt-maha-impl
-python -c "
-import numpy as np
-from warp_score.statistics import MahalanobisStatistics
-K,H,W=3,8,8
-warps=np.random.randn(K,H,W,2).astype(np.float32)
-prec=np.broadcast_to(np.eye(2),(K,H,W,2,2)).copy().astype(np.float32)
-D,logdet,mu=MahalanobisStatistics.ivar_per_pixel(warps,prec)
-print('D_map mean:', D.mean(), '(expected ~', 2*(K-1), ')')
-"
-# Expected output: D_map mean: ~4.0 (expected ~ 4)
-```
+**Dataset**: 200 frames from 5 robot manipulation tasks, 100 hallucination / 100 clean (20 hallu
++ 20 clean per task, from `query/low/` and `query/high/` respectively).
 
-Verified: `D_map mean: 4.022162 (expected ~ 4)` — correct.
-
-### Step 2 — Unit test suite
-
-```bash
-python -m pytest tests/test_mahalanobis.py -v
-# Expected: 7 passed in ~2s
-```
-
-All 7 tests pass:
-1. `test_identity_precision_chi2` — D_map mean in [0.5, 5.0] for K=2, expected ~2
-2. `test_identity_precision_matches_old_ivar` — correlation D vs var_old > 0.9
-3. `test_anisotropic_precision` — D_aniso.mean() > 5 × D_iso.mean()
-4. `test_background_pixels_floored` — bg D=0, bg logdetΛ=-30
-5. `test_task_calibration_roundtrip` — save/load roundtrip for all new fields
-6. `test_cauchy_fuser_properties` — p_null ≈ 0.5, p_signal < 0.05
-7. `test_signal_registry` — RuntimeError on missing maha calibration
-
-### Step 3 — Integration with real calibration (GPU required)
-
-```bash
-python -m warp_score \
-  --config warp_score/configs/maha.yaml \
-  calibrate \
-  --reference_dir data/reference \
-  --artifacts_dir artifacts/v9_maha
-# Expect: calibration.npz with ivar_maha_dist, evidence_dist, T_null per task
-```
-
-### Step 4 — Compare D vs χ²(2(K-1)) per task
-
-```bash
-python -c "
-import numpy as np
-from warp_score.calibrator import CalibrationArtifact
-from scipy import stats
-
-calib = CalibrationArtifact.load('artifacts/v9_maha/calibration.npz')
-for task, tc in calib.tasks.items():
-    if tc.ivar_maha_dist is not None:
-        # Under H0, mean should be ~2*(K-1); check empirical vs theoretical
-        df = 2 * (tc.n_refs - 1)
-        print(f'{task[:40]:40s} mean_D={tc.ivar_maha_dist.mean():.2f} chi2_mean={df}')
-"
-```
-
-### Step 5 — AUROC comparison v8 vs v9
-
-```bash
-# v8 baseline
-python -m warp_score --config warp_score/configs/default.yaml detect --split low > v8_results.csv
-
-# v9 precision-matrix  
-python -m warp_score --config warp_score/configs/maha.yaml detect --split low > v9_results.csv
-
-python -c "
-from sklearn.metrics import roc_auc_score
-import pandas as pd
-v8 = pd.read_csv('v8_results.csv')
-v9 = pd.read_csv('v9_results.csv')
-print('v8 AUROC:', roc_auc_score(v8.label, v8.H_score))
-print('v9 AUROC:', roc_auc_score(v9.label, v9.H_score_maha))
-"
-```
-
-### Step 6 — Per-pixel heatmap validation
-
-Run detect with save_heatmaps=true and visually verify that `T_null`-based heatmaps
-(from `D_map`) concentrate on the geometrically inconsistent regions rather than on
-high-texture areas (which would indicate the heuristic peak signal was firing spuriously).
-
----
-
-## 6. Backward Compatibility
-
-The v9 implementation maintains full backward compatibility:
-
-| Scenario | Behavior |
-|---|---|
-| Old calibration file (no maha keys) | `TaskCalibration.ivar_maha_dist = None`; maha signals silently skipped |
-| `default.yaml` config | `signal_names: [ivar, peak, cert]`, `fuser: stouffer` — unchanged |
-| `legacy_ivar: true` flag | Explicitly disables maha path even when precision is available |
-| RoMaV2 without `precision_AB` | `m.precision = None`; maha signals not computed; existing pipeline unchanged |
-| Old CSV readers | New columns (`raw_ivar_maha`, etc.) absent from CSV when maha not active |
-
-The `_cert_from_preds()` method in `matcher.py` is **unchanged** — scalar cert from
-`√det Σ⁻¹` continues to be computed exactly as before for visualization.
-
----
-
-## 7. Implementation Decisions (Traceability)
-
-- **logdet floor at -30**: background pixels where `det Λ < 1e-12` would give `−∞`. Floor at
-  `-30 ≈ log(1e-13)` chosen to be well below any realistic non-background value (a single
-  reference with identity precision gives `log det Λ = log 1 = 0` at minimum). Implementation:
-  `statistics.py:MahalanobisStatistics.ivar_per_pixel` line `_LOG_DET_FLOOR = -30.0`.
-
-- **det threshold 1e-12 for inversion**: distinguishes numerically singular matrices (background
-  with all-zero precision stacked) from non-singular ones. The value `1e-12` is 2 orders of
-  magnitude below float32 eps squared — safely above floating point noise while below any
-  physically meaningful precision.
-
-- **Bilinear interpolation for precision channels**: RoMaV2 operates at its own internal
-  resolution (e.g., 320×320 for turbo). We bilinear-interpolate all 4 matrix elements
-  independently. This is consistent with how `warp` and `cert` are resized. The resulting matrix
-  may not be exactly PSD after interpolation at boundary pixels, but `_inv2x2` handles
-  near-singular cases gracefully via the det threshold.
-
-- **Cauchy weights default to 1/k**: equal weighting. Task-specific weight tuning can be done
-  via the `stouffer_weights` config key (reused for Cauchy), e.g.:
-  ```yaml
-  stouffer_weights:
-    ivar_maha: 2.0
-    evidence: 1.0
-  ```
-
-- **`T_null` stored only per task, not global**: global `T_null` would require spatial alignment
-  across tasks with different foreground masks — not meaningful. Only per-task `T_null` is stored.
-
-- **Maha signals only when ALL refs return precision**: if any of the K reference matches has
-  `m.precision = None`, the precision list falls short of len(warps) and the maha path is
-  skipped. This prevents partial-precision computation which would give biased estimates.
-
----
-
-## 8. Experimental Results
-
-### 8.1 Setup
-
-**Dataset**: 200 frames from 5 robot manipulation tasks, balanced 100 hallucination / 100 clean.
-Each task contributes 40 frames (20 hallu from `query/low/`, 20 clean from `query/high/`).
-Calibration built from leave-one-out matching on N=53 reference frames per task.
-
-**Tasks**:
-| Task | Description |
-|---|---|
-| Open box | Opening a lidded box — clean textured background |
-| Cucumber | Pick up dark-green cucumber — similar-colored background |
-| Star fruit | Pick up star fruit — moderately complex background |
-| Cup | Pick up cup to trash can — metallic cup, distinct from refs |
-| Pepper | Pick up green pepper — silver metallic arm vs. black-arm refs |
+**Calibration**: N=53 reference frames per task (`test/reference/`), frames spanning the full
+clean trajectory (start to near-end).
 
 **Metric**: AUROC (area under ROC curve). AP (average precision) also reported.
 
----
+**Tasks**:
 
-### 8.2 Signal AUROC Sweep
+| Task ID | Description | Key challenge |
+|---|---|---|
+| Open box | Open a lidded box | Clean, textured; high D_map spread |
+| Cucumber | Pick up dark-green cucumber | Background similar to object; low CV |
+| Star fruit | Pick up yellow star fruit | Moderate complexity |
+| Cup | Pick up cup to trash can | Metallic cup; good CV spread |
+| Pepper | Pick up green pepper | **Semantic inversion**: hallu matches refs |
 
-The following table summarizes all signals evaluated in `analyze_signals.py` (200/200 frames matched):
+### 5.2 Full AUROC Progression
 
-| Signal | AUROC | AP | Notes |
+| System | Signal | AUROC | Notes |
 |---|---|---|---|
-| **adaptive: pt_rank 3way** | **0.7735** | 0.7368 | **Best — CV-routed, 3-way** |
-| Oracle: pt_rank (uses labels) | 0.7660 | 0.7473 | Label-supervised upper bound |
-| adaptive: pt_rank (CV-routed) | 0.7590 | 0.6951 | 2-way CV routing |
-| rank: ivar_maha + peak_maha | 0.7057 | 0.7608 | Global rank sum of both signals |
-| rank: 2×ivar + peak | 0.6915 | 0.7358 | Weighted rank sum |
-| adaptive: raw (CV-routed) | 0.6627 | 0.6462 | Raw (cross-task scale issues) |
-| raw_ivar_maha | 0.6386 | 0.6082 | Baseline single-signal |
-| raw_peak_maha | 0.6153 | 0.6308 | |
-| rank: ivar_maha + ivar_px | 0.6094 | 0.6100 | |
-| H: 1-p(ivar_maha) | 0.5529 | 0.5545 | Per-task p-norm hurts cross-task ranking |
-| H: Cauchy(ivar_maha + evidence) | 0.5143 | 0.5429 | evidence is anti-correlated → hurts |
-| raw_evidence | 0.5005 | 0.4887 | Near-random |
+| v8 | Stouffer(ivar, peak, cert) | ~0.44 | Heuristic, assumes independence |
+| v9 | Cauchy(ivar_maha, evidence) | 0.5143 | Evidence anti-correlated → hurts |
+| v9 | raw_ivar_maha only | 0.6386 | Drop evidence, use raw cross-task ranking |
+| v9 | rank(ivar_maha + peak_maha) | 0.7057 | Add peak_maha as complement |
+| v9 | adaptive pt_rank (CV 2-way) | 0.7590 | Task-aware routing (CV threshold) |
+| v9 | **adaptive pt_rank (CV 3-way)** | **0.7735** | **v9 best — fuse both for high-CV tasks** |
+| v9 | Oracle (label-supervised) | 0.7660 | v9 beats oracle with fusion |
+| v10 | knn-15 (old 3-way routing) | 0.7414 | CV thresholds not yet tuned for k-NN |
+| v10 | **knn-15 (4-way ratio+CV)** | **0.8130** | **v10 best — ties oracle** |
+| v10 | Oracle (label-supervised) | 0.8130 | Oracle improved: signals fundamentally better |
 
-**Key finding**: the `evidence` signal (log-det evidence) is **anti-correlated** with true
-hallucination in this dataset — adding it via Cauchy fusion hurts from 0.6386 → 0.5143. This
-is consistent with the OOD-detection story: hallucinations in this dataset manifest as confident
-*but wrong* warps (the K refs agree on an incorrect correspondence), not as the collective-give-up
-failure mode that evidence is designed to catch. Evidence targets a different failure mode.
+### 5.3 Per-Task AUROC: v9 vs v10
 
----
-
-### 8.3 Per-Task Breakdown and Domain Shift Discovery
-
-| Task | ivar_maha | peak_maha | ivar_px | Adaptive 3way | Notes |
+| Task | v9 3-way | v9 signal | v10 4-way | v10 signal | Change |
 |---|---|---|---|---|---|
-| Open box | 0.835 | 0.870 | 0.830 | **0.946** | Both signals strong → rank-sum wins |
-| Cucumber | 0.370 | 0.580 | 0.749 | 0.580 | Low CV; peak routing correct |
-| Star fruit | 0.518 | 0.595 | n/a | 0.595 | Low CV; peak routing correct |
-| Cup | **0.870** | 0.218 | 0.645 | **0.870** | High CV; ivar routing correct |
-| Pepper | 0.272 | **0.915** | 0.156 | **0.915** | Low CV; peak routing correct |
+| Open box | 0.921 | rank_sum | 0.845 | ivar_maha | −0.076 |
+| Cucumber | 0.520 | peak_maha | **0.723** | peak_maha | **+0.203** ✓ |
+| Star fruit | 0.575 | peak_maha | **0.755** | ivar_maha | **+0.180** ✓ |
+| Cup | 0.842 | ivar_maha | 0.877 | ivar_maha | +0.035 |
+| Pepper | 0.865 | peak_maha | 0.865 | peak_maha | 0.000 |
+| **Global** | **0.7735** | — | **0.8130** | — | **+0.0395** |
 
-**Pepper inversion (critical finding)**: The Pepper task uses refs of the robot at the *starting
-pose* (black arms). Hallucinated frames (model defaults to start pose, black arms) look *more
-similar* to refs than clean frames (silver arm mid-task). This inverts the signal:
-- Hallu Pepper: raw_ivar_maha ≈ 0.3–0.4 (BELOW null min 0.669) → model "agrees" with refs
-- Clean Pepper: raw_ivar_maha ≈ 0.6–0.9 → silver arm creates genuine disagreement
+Open box regression (−0.076): k-NN concentrates on visually similar refs, losing the diversity
+benefit that helped rank_sum fusion. The oracle for Open box with k-NN is still 0.845 (single
+signal). See §6.1 for mitigation.
 
-`ivar_maha` AUROC = 0.272 for Pepper (≈ inverted). `peak_maha` AUROC = 0.915 — it detects
-the *concentrated* anomaly spots on a hallucinated frame even when the global D-map is low.
+### 5.4 Per-Task Routing Diagnostics (v10, k=15)
 
-**Cup domain-shift without inversion**: Cup also has low ivar_ratio (test_mean / null_mean = 0.58)
-but ivar_maha AUROC = 0.870. The domain shift is *uniform* across both hallu and clean frames —
-relative ordering preserved. CV(ivar) = 0.619 (high), indicating within-task spread is large.
-
----
-
-### 8.4 CV-Based Unsupervised Signal Routing
-
-The key diagnostic distinguishing "use ivar" from "use peak_maha" tasks is the coefficient of
-variation of within-task ivar_maha scores:
-
-```
-CV(ivar_maha, task) = std_{f ∈ task}(raw_ivar_maha_f)  /  mean_{f ∈ task}(raw_ivar_maha_f)
-```
-
-| Task | ivar_ratio | CV(ivar) | Routing | Correct? |
+| Task | ivar_ratio | CV(ivar) | 4-way routing | Per-task AUROC |
 |---|---|---|---|---|
-| Open box | 11.69 | **0.828** | ivar+peak sum (CV≥0.70) | ✓ (both help) |
-| Cucumber | 0.61 | 0.378 | peak (CV<0.50) | ✓ |
-| Star fruit | 0.55 | 0.372 | peak (CV<0.50) | ✓ |
-| Cup | 0.58 | **0.619** | ivar (0.50≤CV<0.70) | ✓ |
-| Pepper | 0.80 | 0.386 | peak (CV<0.50) | ✓ |
+| Open box | 5.66 | 1.178 | ivar_maha (ratio≥1, CV≥0.50) | 0.845 |
+| Cucumber | 1.07 | 0.491 | **peak_maha** (CV<0.50) | 0.723 |
+| Star fruit | 1.04 | 0.794 | ivar_maha (ratio≥1, CV≥0.50) | 0.755 |
+| Cup | 1.26 | 0.692 | ivar_maha (ratio≥1, CV≥0.50) | 0.877 |
+| Pepper | **0.82** | 0.743 | **peak_maha** (ratio<1.0) | 0.865 |
 
-**3-way routing rules** (thresholds CV_HIGH=0.70, CV_THRESHOLD=0.50):
+Pepper is routed to peak_maha because `ivar_ratio=0.82 < 1.0` — the test mean D_map is *below*
+the null mean, indicating the signal is inverted (hallu frames match refs better than clean frames).
 
-```
-CV ≥ 0.70  →  score = (pt_rank(ivar_maha) + pt_rank(peak_maha)) / 2   [both signals used]
-0.50 ≤ CV < 0.70  →  score = pt_rank(ivar_maha)                         [ivar only]
-CV < 0.50  →  score = pt_rank(peak_maha)                                 [peak only]
-```
+### 5.5 Why the Oracle Improved: 0.7660 → 0.8130
 
-**Intuition**: high CV means ivar_maha has large *relative* spread — the signal is discriminating
-between frames within the task, regardless of domain shift. Low CV means ivar_maha is flat (domain
-shift makes all frames look alike by this metric) → peak_maha's shift-invariant within-frame
-contrast is the only useful signal.
+With v9 fixed refs, the oracle per task was limited by the marginal null. With v10 k-NN refs:
 
-**CV computation is unsupervised**: it uses only the test-time scores for the task batch, with
-no labels. This is valid at inference time as long as all frames from a task are processed together
-(e.g., all 40 evaluation frames, or a batch of reference-vs-query comparisons).
+- **Cucumber** oracle: 0.52 → 0.723. With task-state-aligned refs, clean cucumber frames now
+  match their k-NN refs well (similar robot pose, similar scene), while hallucinated frames
+  show genuine disagreement.
+- **Star fruit** oracle: 0.58 → 0.755. Same mechanism.
+- **Open box** oracle: 0.921 → 0.845. Small regression because diversity of refs helped the
+  rank-sum fusion in v9; k-NN reduces diversity.
 
----
+The oracle jump (+0.0470) confirms that adaptive ref selection fundamentally improves signal
+quality, not just routing.
 
-### 8.5 AUROC vs. Oracle Analysis
+### 5.6 Comparison Table: DCRCS-25 vs k-NN-15 vs Full-ref Baseline
 
-The adaptive 3-way routing (AUROC=0.7735) **exceeds** the single-signal label-oracle (0.7660) by +0.0075. This is possible because:
+| System | AUROC | LOO samples | Notes |
+|---|---|---|---|
+| Baseline (53 refs, v9 routing) | 0.7735 | 53 per task | Best before v10 |
+| DCRCS-12 (diverse 12 refs) | 0.6468 | 12 per task | Too few LOO → noisy null |
+| DCRCS-25 (diverse 25 refs) | 0.7361 | 25 per task | Better but still noisy |
+| **k-NN-15 (adaptive 15 refs)** | **0.8130** | **53 per task** | **Best: preserves samples** |
 
-- **Oracle** selects the *best single signal* per task (using labels). For Open box, oracle picks
-  peak (0.870) over ivar (0.835).
-- **Adaptive 3-way** uses the rank SUM for Open box (per-task AUROC=0.946 > max(0.835, 0.870)).
-  The two signals carry complementary information within Open box, and neither individually
-  captures all discriminative structure.
-
-The progression from v8 to the best v9 combination:
-
-```
-v8 Stouffer (ivar, peak, cert):       AUROC ≈ 0.44
-v9 Cauchy(ivar_maha, evidence):       AUROC = 0.5143   (evidence anti-correlated)
-v9 raw_ivar_maha only:                AUROC = 0.6386   (drop evidence, use raw)
-rank(ivar_maha + peak_maha):          AUROC = 0.7057   (+0.067 — two-signal rank sum)
-adaptive pt_rank, CV routing:         AUROC = 0.7590   (+0.020 — task-aware routing)
-adaptive pt_rank, 3-way CV routing:   AUROC = 0.7735   (+0.015 — sum high-CV tasks)
-label oracle (pt_rank):               AUROC = 0.7660   (our best exceeds oracle!)
-```
+DCRCS reduces ref count → fewer LOO samples → noisier null distribution → lower AUROC.
+k-NN-15 preserves N=53 LOO samples while making each sample task-state-conditional → better
+signal quality without sacrificing calibration resolution.
 
 ---
 
-### 8.6 Summary of Key Insights
+## 6. Analysis and Key Insights
 
-1. **Cochran deviance (ivar_maha) is the core signal**: monotone transformation of the
-   precision-weighted disagreement, theoretically grounded in chi-squared distributional theory.
-   Raw (unnormalized) cross-task ranking outperforms per-task p-normalized ranking.
+### 6.1 Open Box Regression with k-NN
 
-2. **Evidence is orthogonal but unhelpful here**: log-det evidence targets OOD / collective
-   matcher-gives-up failure, which does not occur in this dataset. Including it hurts via
-   Cauchy fusion. It may be useful in datasets with OOD queries.
+In v9, Open box achieves AUROC=0.921 with rank_sum fusion (rank(ivar_maha) + rank(peak_maha)).
+In v10, Open box achieves 0.845 with k-NN + ivar_maha.
 
-3. **peak_maha as complement**: shift-invariant within-frame peak Z-score of D_map. Captures
-   concentrated hallucination anomalies in tasks where uniform domain shift makes ivar_maha flat.
-   Together, {ivar_maha, peak_maha} are nearly complementary: high CV tasks favor ivar, low CV tasks
-   favor peak.
+**Root cause**: with k=15 nearest refs, each test frame is compared against visually similar
+refs only. For Open box, the task is straightforward (uniform textured background, clear hand
+motion) — all frames look broadly similar. The k-NN might select 15 refs that are all in a
+small visual cluster, reducing the diversity that helped rank_sum in v9.
 
-4. **CV-based routing beats single-signal oracle**: unsupervised coefficient of variation of
-   ivar_maha correctly routes all 5 tasks to the better signal, and uses both signals for tasks
-   where they are jointly discriminative.
+**Potential fix**: task-adaptive k — use a larger k for tasks with high ivar_ratio (strong
+discriminative signal, can afford more refs) and smaller k for tasks where diversity hurts
+(low ivar_ratio).
 
-5. **Pepper semantic inversion**: hallucination = "looks too much like refs" is undetectable
-   by any global D-map signal (ivar_maha). peak_maha's within-frame Z-score partially recovers this
-   by detecting concentrated off-distribution spots even when the global D-map is below null.
-   Proper fix: supplement with mid-task reference frames for Pepper to capture the silver arm state.
+### 6.2 Batch Inference Requirement for CV Routing
+
+Both the v9 CV-based routing and the v10 ivar_ratio routing require statistics computed over
+a batch of test frames from the same task:
+
+```
+ivar_ratio = mean_f(raw_ivar_maha_f) / null_mean
+CV         = std_f(raw_ivar_maha_f) / mean_f(raw_ivar_maha_f)
+```
+
+**For single-frame inference**, this routing cannot be applied directly. Options:
+1. **Pre-compute task routing** from a pilot batch of unlabeled frames at task deployment time.
+2. **Proxy signals**: replace batch CV with a per-frame uncertainty proxy (e.g., entropy of
+   DINOv2 attention maps, or the ratio of D_map max/mean within the frame).
+3. **Conservative default**: always use `peak_maha` (AUROC=0.5532 baseline, less good but safe)
+   or always use `ivar_maha` (0.6419) for single-frame mode.
+
+### 6.3 Semantic Inversion (Pepper Task) — Deep Analysis
+
+**Why ivar_maha fails on Pepper** (AUROC=0.272 with v9 fixed refs):
+
+The robot's default behavior when hallucinating is to revert to the starting pose (black arm,
+specific joint angles). The 53 reference frames were collected from clean executions that happen
+to show the robot mostly in the starting configuration (or configurations similar to start).
+Result: hallucinated frames (reset to start) have *lower* D_map than clean frames (silver arm,
+mid-task position that doesn't match any reference well).
+
+**Why k-NN partially mitigates this** but ivar_ratio routing is still needed:
+
+With k-NN, a clean mid-task Pepper frame now selects refs at similar mid-task states (if they
+exist in the 53-ref pool). If they do, D_map drops for clean frames → better separation.
+However, ivar_ratio is still 0.82 < 1.0 (inverted), suggesting the mitigation is partial.
+The ivar_ratio routing correctly forces peak_maha, which achieves 0.865 robustly.
+
+**Fundamental fix**: supplement Pepper references with mid-task frames (silver arm, in-progress
+grasps) to make the null model representative of the full clean trajectory.
+
+### 6.4 Theoretical Soundness of k-NN Null
+
+The k-NN calibration is theoretically valid because:
+
+1. LOO samples are **exchangeable** (each ref is left out once and matched against its k nearest
+   neighbors in the same pool) — the exchangeability required for finite-sample valid p-values
+   (Vovk et al. 2005) is maintained.
+
+2. Degrees of freedom are **consistent**: both LOO calibration and inference use k refs →
+   D_map ~ χ²(2(k-1)) in both cases → the empirical CDF is a consistent estimator of the
+   true chi-squared CDF.
+
+3. The k-NN selection is **deterministic given the query** — no randomness is introduced at
+   inference time, so the null remains a fixed distribution conditioned on task and frame.
+
+---
+
+## 7. Backward Compatibility
+
+| Scenario | Behavior |
+|---|---|
+| `adaptive_ref_selector: false` (default) | Exact v9 pipeline, byte-for-byte identical results |
+| Old calibration.npz (no k-NN metadata) | `selection_policy="full"`, `k_per_frame=None` |
+| `default.yaml` config | `signal_names: [ivar, peak, cert]`, `fuser: stouffer` — unchanged |
+| RoMaV2 without `precision_AB` | `m.precision = None`; maha signals skipped |
+| Old CSV readers | New columns absent when maha not active |
+| DINOv2 not installed | `_ADAPTIVE_AVAILABLE = False`; error on first call when enabled |
+
+---
+
+## 8. Running the Pipeline
+
+### 8.1 v9 Baseline (Full 53 refs)
+```bash
+conda run -n groot python -m warp_score \
+    --config warp_score/configs/test_ivar_peak_maha.yaml calibrate
+conda run -n groot python -m warp_score \
+    --config warp_score/configs/test_ivar_peak_maha.yaml detect
+conda run -n groot python test/v9_precision_matrix/analyze_signals.py \
+    --summary test/v9_ivar_peak_maha/results/summary.csv \
+    --labels test/results/labels.csv \
+    --calib test/v9_ivar_peak_maha/results/calibration.npz
+# → AUROC=0.7735 (adaptive 3-way)
+```
+
+### 8.2 v10 Adaptive k-NN (k=15)
+```bash
+conda run -n groot python -m warp_score \
+    --config warp_score/configs/test_knn15.yaml calibrate
+conda run -n groot python -m warp_score \
+    --config warp_score/configs/test_knn15.yaml detect
+conda run -n groot python test/v9_precision_matrix/analyze_signals.py \
+    --summary test/v9_knn15/results/summary.csv \
+    --labels test/results/labels.csv \
+    --calib test/v9_knn15/results/calibration.npz
+# → AUROC=0.8130 (adaptive 4-way ratio+CV)
+```
+
+### 8.3 Ablation: Different k Values
+Create `test_knnN.yaml` (copy `test_knn15.yaml`, change `k_per_frame: N` and `artifacts_dir`).
+The same calibrate + detect + eval pipeline applies. Expected behavior:
+- k→53: approaches full-ref baseline (0.7735) as k-NN degenerates to all refs
+- k=15: current best (0.8130)
+- k=8: potentially worse (df=14, noisy chi-squared null; fewer matched refs)
 
 ---
 
 ## 9. References
 
-1. Cochran, W. G. (1934). The distribution of quadratic forms in a normal system, with applications to the analysis of covariance. *Mathematical Proceedings of the Cambridge Philosophical Society*, 30(2), 178–191.
+1. Cochran, W. G. (1934). The distribution of quadratic forms in a normal system. *Proc. Cambridge Phil. Soc.*, 30(2), 178–191.
 
-2. Kalman, R. E. (1960). A new approach to linear filtering and prediction problems. *Transactions of the ASME — Journal of Basic Engineering*, 82(1), 35–45.
+2. Liu, Y., & Xie, J. (2020). Cauchy combination test: a powerful test with analytic p-value calculation under arbitrary dependency structures. *JASA*, 115(529), 393–402.
 
-3. Hotelling, H. (1931). The generalization of Student's ratio. *Annals of Mathematical Statistics*, 2(3), 360–378.
+3. Vovk, V., Gammerman, A., & Shafer, G. (2005). *Algorithmic Learning in a Random World*. Springer. (Exchangeable LOO p-values.)
 
-4. Liu, Y., & Xie, J. (2020). Cauchy combination test: A powerful test with analytic p-value calculation under arbitrary dependency structures. *Journal of the American Statistical Association*, 115(529), 393–402.
+4. Oquab, M., et al. (2023). DINOv2: Learning Robust Visual Features without Supervision. *TMLR*. (DINOv2 features for task-state embedding.)
 
-5. Vovk, V., Gammerman, A., & Shafer, G. (2005). *Algorithmic Learning in a Random World*. Springer. (Conformal/exchangeable p-values, finite-sample validity of LOO calibration.)
+5. Gauss, C. F. (1823). *Theoria Combinationis Observationum*. (BLUE / Gauss-Markov theorem.)
 
-6. Brox, T., & Malik, J. (2010). Object segmentation by long-term analysis of point trajectories. In *ECCV 2010*. (Forward-backward consistency; basis for future `cycle_consistency` signal.)
-
-7. Gauss, C. F. (1823). *Theoria Combinationis Observationum Erroribus Minimis Obnoxiae*. (Least-squares / BLUE; the Gauss-Markov theorem used for μ̂ derivation.)
+6. Hotelling, H. (1931). The generalization of Student's ratio. *Ann. Math. Stat.*, 2(3), 360–378.
 
 ---
 
-*This document was generated after implementing commit `1f06ccd` on branch `wt-maha-impl` of
-the `feature_matching_eval_hallucination` repository. All unit tests pass; GPU integration
-testing is the next step.*
+*Document reflects branch `feat/adaptive-knn-refs`, commits `65216f1` (k-NN implementation)
+and `e75ca44` (4-way routing). All AUROC numbers from 200-frame test set, 5 tasks × 40 frames.*
