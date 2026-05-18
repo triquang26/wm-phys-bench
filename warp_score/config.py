@@ -40,10 +40,14 @@ class WarpScoreConfig:
 
     # ── Signals + fusion ───────────────────────────────────────────────────
     signal_names: tuple[str, ...] = ("ivar", "peak", "cert")
-    fuser: Literal["stouffer", "fisher", "max"] = "stouffer"
+    fuser: Literal["stouffer", "fisher", "max", "cauchy"] = "stouffer"
     stouffer_weights: dict[str, float] = field(default_factory=lambda: {
         "ivar": 2.0, "peak": 1.0, "cert": 1.0,
     })
+
+    # ── v9 precision-matrix flags ──────────────────────────────────────────
+    cycle_consistency: bool = False   # reserved for future cycle-consistent matching
+    legacy_ivar: bool = False          # if True, use old ivar+peak+cert+Stouffer pipeline
 
     # ── Decision threshold ─────────────────────────────────────────────────
     fpr_alpha: float = 0.05  # H_score > (1 - alpha) → label=1

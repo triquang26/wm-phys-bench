@@ -73,6 +73,35 @@ class MaxFuser(SignalFuser):
         return float(min(p_values.values()))
 
 
+class CauchyFuser(SignalFuser):
+    """Cauchy combination test (Liu & Xie 2020).
+
+    Valid under arbitrary dependence between p-values — unlike Stouffer/Fisher
+    which assume independence.  Particularly suitable for the v9 maha signals
+    (ivar_maha, evidence) which are derived from the same precision matrices.
+
+    Combination rule:
+        T = Σ w_i · tan(π(½ − p_i))   ~  Cauchy(0, 1)  under H₀
+        p_combined = ½ − arctan(T) / π
+    """
+
+    def __init__(self, weights: dict[str, float] | None = None) -> None:
+        self.weights = weights or {}
+
+    def fuse(self, p_values: dict[str, float]) -> float:
+        if not p_values:
+            return 1.0
+        names = list(p_values.keys())
+        k = len(names)
+        ps = np.clip(np.array([p_values[n] for n in names], dtype=np.float64),
+                     _P_EPS, 1.0 - _P_EPS)
+        ws = np.array([self.weights.get(n, 1.0 / k) for n in names], dtype=np.float64)
+        ws = ws / ws.sum()
+        T = float(np.sum(ws * np.tan(np.pi * (0.5 - ps))))
+        p_combined = 0.5 - np.arctan(T) / np.pi
+        return float(np.clip(p_combined, _P_EPS, 1.0))
+
+
 def build_fuser(
     name: str, stouffer_weights: dict[str, float] | None = None,
 ) -> SignalFuser:
@@ -82,4 +111,6 @@ def build_fuser(
         return FisherFuser()
     if name == "max":
         return MaxFuser()
-    raise ValueError(f"Unknown fuser '{name}'. Choices: stouffer, fisher, max.")
+    if name == "cauchy":
+        return CauchyFuser(weights=stouffer_weights)
+    raise ValueError(f"Unknown fuser '{name}'. Choices: stouffer, fisher, max, cauchy.")

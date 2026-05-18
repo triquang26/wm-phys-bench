@@ -69,10 +69,68 @@ class CertSignal(Signal):
         return calib.cert_dist
 
 
+# ── v9 precision-matrix signals ───────────────────────────────────────────────
+
+class IvarMahaSignal(Signal):
+    """Mahalanobis interior variance — Cochran deviance D averaged over interior.
+
+    Calibrated under the null (clean refs in LOO); large D = refs disagree in
+    the metric defined by their own precision matrices = hallucination evidence.
+    """
+    name = "ivar_maha"
+    direction = "high"
+
+    def get_distribution(self, calib: "TaskCalibration") -> np.ndarray:
+        if calib.ivar_maha_dist is None:
+            raise RuntimeError(
+                "No ivar_maha_dist in calibration (run calibrate with maha.yaml config)"
+            )
+        return calib.ivar_maha_dist
+
+
+class EvidenceSignal(Signal):
+    """Evidence signal e(p) = -log det Λ(p) averaged over interior.
+
+    High evidence = total precision matrix is near-singular = matcher had
+    little geometric information for those pixels = anomalous frame region.
+    """
+    name = "evidence"
+    direction = "high"  # high e(p) = low information = anomalous
+
+    def get_distribution(self, calib: "TaskCalibration") -> np.ndarray:
+        if calib.evidence_dist is None:
+            raise RuntimeError(
+                "No evidence_dist in calibration (run calibrate with maha.yaml config)"
+            )
+        return calib.evidence_dist
+
+
+class PeakMahaSignal(Signal):
+    """Peak Z-score of D_map within the interior.
+
+    Unlike ivar_maha (interior mean of D_map), the peak Z-score is invariant
+    to a uniform additive shift in D_map — robust to domain gaps where the
+    matcher consistently assigns high D to ALL frames (clean and hallu alike),
+    but hallucinated frames have a *structurally concentrated* peak.
+    """
+    name = "peak_maha"
+    direction = "high"
+
+    def get_distribution(self, calib: "TaskCalibration") -> np.ndarray:
+        if calib.peak_maha_dist is None:
+            raise RuntimeError(
+                "No peak_maha_dist in calibration (run calibrate with maha config)"
+            )
+        return calib.peak_maha_dist
+
+
 _REGISTRY: dict[str, type[Signal]] = {
     "ivar": IvarSignal,
-    "peak": PeakSignal,
-    "cert": CertSignal,
+    "peak": PeakSignal,           # v8 ablation-only
+    "cert": CertSignal,           # v8 ablation-only
+    "ivar_maha": IvarMahaSignal,
+    "evidence": EvidenceSignal,
+    "peak_maha": PeakMahaSignal,
 }
 
 

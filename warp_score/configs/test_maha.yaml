@@ -1,0 +1,12 @@
+# v9 test run — points at test/ folder data
+signal_names:
+  - ivar_maha
+  - evidence
+fuser: cauchy
+per_pixel_calibration: true
+use_precision: true
+reference_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/reference
+query_high_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/high
+query_low_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/low
+artifacts_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/v9_precision_matrix/results
+n_min_refs: 10
