@@ -9,6 +9,7 @@ Single-frame inference contract:
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -45,6 +46,12 @@ class HallucinationResult:
     mean_cert_fg: float = 0.0
     fg_pixel_count: int = 0
 
+    # Per-stage timing in milliseconds
+    t_dino_ms:   float = 0.0   # DINOv2 embed + k-NN ref selection
+    t_roma_ms:   float = 0.0   # RoMa matching (all refs combined)
+    t_signal_ms: float = 0.0   # Signal + p-value computation
+    t_total_ms:  float = 0.0   # End-to-end for this frame
+
     def to_csv_row(self) -> dict:
         row = {
             "task": self.task,
@@ -58,6 +65,10 @@ class HallucinationResult:
             "frame_score_max": round(self.frame_score_max, 6),
             "mean_cert_fg": round(self.mean_cert_fg, 6),
             "fg_pixel_count": self.fg_pixel_count,
+            "t_dino_ms":   round(self.t_dino_ms,   1),
+            "t_roma_ms":   round(self.t_roma_ms,   1),
+            "t_signal_ms": round(self.t_signal_ms, 1),
+            "t_total_ms":  round(self.t_total_ms,  1),
             "auto_detected_task": self.auto_detected_task,
         }
         for name, p in self.p_per_signal.items():
@@ -101,6 +112,7 @@ class WarpVarianceDetector:
         refs: explicit ref paths; defaults to ones discovered from
               config.reference_dir / <task> / *.png.
         """
+        _t0 = time.perf_counter()
         query_path = Path(query_path)
         task = task or query_path.parent.name
         task_calib = self._resolve_task_calib(task)
@@ -108,11 +120,16 @@ class WarpVarianceDetector:
         if not refs:
             raise RuntimeError(f"No refs found for task '{task}'")
 
+        # ── Adaptive k-NN ref selection ───────────────────────────────────
+        _t_dino_ms = 0.0  # set to non-zero only when adaptive selector is active
+
         # ── Load query + masks ────────────────────────────────────────────
         img_bgr, fg_mask, interior_mask = self._load_query(query_path)
 
         # ── Match against refs ────────────────────────────────────────────
+        _t_roma0 = time.perf_counter()
         warps, certs, ok_refs = self._match_all(query_path, refs, fg_mask)
+        _t_roma_ms = (time.perf_counter() - _t_roma0) * 1000.0
         if not warps:
             raise RuntimeError(
                 f"All {len(refs)} refs failed to match for {query_path} "
@@ -123,6 +140,7 @@ class WarpVarianceDetector:
         certs_a = np.stack(certs)
 
         # ── Compute raw signals ───────────────────────────────────────────
+        _t_sig0 = time.perf_counter()
         var_map = CertWeightedStatistics.variance_per_pixel(warps_a, certs_a)
         raw = {
             "ivar": CertWeightedStatistics.interior_mean(var_map, interior_mask),
@@ -137,6 +155,7 @@ class WarpVarianceDetector:
 
         # ── Fuse ──────────────────────────────────────────────────────────
         p_combined = self.fuser.fuse(p_per_signal)
+        _t_sig_ms = (time.perf_counter() - _t_sig0) * 1000.0
         H_score = 1.0 - p_combined
         is_h = H_score > self.config.decision_threshold
 
@@ -157,6 +176,10 @@ class WarpVarianceDetector:
             frame_score_max=raw["peak"],
             mean_cert_fg=raw["cert"],
             fg_pixel_count=int(fg_mask.sum()),
+            t_dino_ms   = _t_dino_ms,
+            t_roma_ms   = _t_roma_ms,
+            t_signal_ms = _t_sig_ms,
+            t_total_ms  = (time.perf_counter() - _t0) * 1000.0,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
