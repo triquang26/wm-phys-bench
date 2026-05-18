@@ -293,28 +293,27 @@ class WarpVarianceDetector:
     def _match_all(
         self, query_path: Path, refs: list[Path], fg_mask: np.ndarray,
     ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[Path]]:
-        warps: list[np.ndarray] = []
-        certs: list[np.ndarray] = []
-        precisions: list[np.ndarray] = []
-        ok_refs: list[Path] = []
-        n_failed = 0
-        for ref_path in refs:
-            try:
-                m = self.matcher.match(query_path, ref_path, fg_mask=fg_mask)
-                warps.append(m.warp)
-                certs.append(m.cert)
-                if m.precision is not None:
-                    precisions.append(m.precision)
-                ok_refs.append(ref_path)
-            except Exception as e:
-                n_failed += 1
-                print(f"[detect] match failed {Path(ref_path).name}: {e}")
-        if n_failed:
-            print(
-                f"[detect] {len(ok_refs)}/{len(refs)} refs matched successfully "
-                f"({n_failed} failed) for {query_path.name}"
-            )
-        return warps, certs, precisions, ok_refs
+        try:
+            results = self.matcher.match_batch(query_path, refs, fg_mask=fg_mask)
+            warps      = [r.warp      for r in results]
+            certs      = [r.cert      for r in results]
+            precisions = [r.precision for r in results if r.precision is not None]
+            return warps, certs, precisions, refs
+        except Exception as e:
+            # Fallback to sequential if batch fails (e.g. OOM)
+            print(f"[detect] match_batch failed ({e}), falling back to sequential")
+            warps, certs, precisions, ok_refs = [], [], [], []
+            for ref_path in refs:
+                try:
+                    m = self.matcher.match(query_path, ref_path, fg_mask=fg_mask)
+                    warps.append(m.warp)
+                    certs.append(m.cert)
+                    if m.precision is not None:
+                        precisions.append(m.precision)
+                    ok_refs.append(ref_path)
+                except Exception as e2:
+                    print(f"[detect] match failed {Path(ref_path).name}: {e2}")
+            return warps, certs, precisions, ok_refs
 
     def _compute_heatmap(
         self,
