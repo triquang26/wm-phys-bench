@@ -301,30 +301,6 @@ def main(args):
         else:                             # discriminative ivar → ivar_maha
             h_adaptive_4way.append(ri)
 
-    # ── 4-signal per-task rank Cauchy fusion (v11 Phase A) ────────────────────
-    # No routing thresholds — combine ivar_maha + peak_maha + ivar_px + evidence.
-    # Per-task rank maps each signal to [0,1] within its task, then Cauchy
-    # combination handles signal dependence and partial anti-correlation gracefully.
-    pt_rank_ivar_px   = per_task_rank(raw_ivar_px)
-    pt_rank_evidence  = per_task_rank(raw_evidence)
-
-    h_cauchy4_pt = []
-    for i in range(len(y)):
-        # p_signal = 1 - rank means: rank=1.0 (highest) → p=0.0 → maximal hallu signal
-        p_i  = 1.0 - pt_rank_ivar[i]
-        p_pk = 1.0 - pt_rank_peak[i]
-        p_px = 1.0 - pt_rank_ivar_px[i]
-        p_ev = 1.0 - pt_rank_evidence[i]
-        h_cauchy4_pt.append(1.0 - cauchy_fuse([p_i, p_pk, p_px, p_ev]))
-
-    # Also a 3-signal version (ivar+peak+ivar_px, no evidence):
-    h_cauchy3_pt = []
-    for i in range(len(y)):
-        p_i  = 1.0 - pt_rank_ivar[i]
-        p_pk = 1.0 - pt_rank_peak[i]
-        p_px = 1.0 - pt_rank_ivar_px[i]
-        h_cauchy3_pt.append(1.0 - cauchy_fuse([p_i, p_pk, p_px]))
-
     # Oracle: per-task, per-signal AUROC → choose best signal per task
     # (upper bound — uses labels, not usable at inference time)
     task_oracle_signal: dict[str, str] = {}
@@ -397,8 +373,6 @@ def main(args):
         "adaptive: pt_rank (calib-routed)": h_adaptive_pt_rank,
         "adaptive: pt_rank 3way":           h_adaptive_3way,
         "adaptive: pt_rank 4way (ratio+CV)": h_adaptive_4way,
-        "v11: Cauchy4(ivar+peak+ivar_px+evidence)": h_cauchy4_pt,
-        "v11: Cauchy3(ivar+peak+ivar_px)":          h_cauchy3_pt,
         "ORACLE: raw (labels)":             h_oracle,
         "ORACLE: pt_rank (labels)":         h_oracle_pt,
     }
