@@ -9,6 +9,7 @@ Single-frame inference contract:
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,12 @@ from .mask import ForegroundMask, InteriorMask
 from .matcher import RoMaMatcher
 from .signals import Signal, per_pixel_p_value
 from .statistics import CertWeightedStatistics, MahalanobisStatistics
+
+try:
+    from .adaptive_refs import AdaptiveRefSelector, DinoFeatureExtractor
+    _ADAPTIVE_AVAILABLE = True
+except ImportError:
+    _ADAPTIVE_AVAILABLE = False
 
 
 @dataclass
@@ -45,6 +52,12 @@ class HallucinationResult:
     mean_cert_fg: float = 0.0
     fg_pixel_count: int = 0
 
+    # Per-stage timing in milliseconds
+    t_dino_ms:   float = 0.0   # DINOv2 embed + k-NN ref selection
+    t_roma_ms:   float = 0.0   # RoMa matching (all refs combined)
+    t_signal_ms: float = 0.0   # Signal + p-value computation
+    t_total_ms:  float = 0.0   # End-to-end for this frame
+
     def to_csv_row(self) -> dict:
         row = {
             "task": self.task,
@@ -58,6 +71,10 @@ class HallucinationResult:
             "frame_score_max": round(self.frame_score_max, 6),
             "mean_cert_fg": round(self.mean_cert_fg, 6),
             "fg_pixel_count": self.fg_pixel_count,
+            "t_dino_ms":   round(self.t_dino_ms,   1),
+            "t_roma_ms":   round(self.t_roma_ms,   1),
+            "t_signal_ms": round(self.t_signal_ms, 1),
+            "t_total_ms":  round(self.t_total_ms,  1),
             "auto_detected_task": self.auto_detected_task,
         }
         for name, p in self.p_per_signal.items():
@@ -106,6 +123,8 @@ class WarpVarianceDetector:
         self.fuser = fuser
         self.signals = signals
         self.interior = interior_mask
+        self._adaptive_selector: "Optional[AdaptiveRefSelector]" = None
+        self._ref_feats_cache: dict[str, np.ndarray] = {}
 
     def detect(
         self,
@@ -120,6 +139,7 @@ class WarpVarianceDetector:
         refs: explicit ref paths; defaults to ones discovered from
               config.reference_dir / <task> / *.png.
         """
+        _t0 = time.perf_counter()
         query_path = Path(query_path)
         task = task or query_path.parent.name
         task_calib = self._resolve_task_calib(task)
@@ -127,11 +147,24 @@ class WarpVarianceDetector:
         if not refs:
             raise RuntimeError(f"No refs found for task '{task}'")
 
+        # ── Adaptive k-NN ref selection (speed-invariant task-state conditioning) ─
+        _t_dino_ms = 0.0
+        selector = self._get_adaptive_selector()
+        if selector is not None:
+            _t_dino0 = time.perf_counter()
+            ref_feats = self._get_ref_feats(task, refs)
+            query_feat = selector.extractor.extract([query_path])[0]
+            top_k_idx = selector.select_for_query(query_feat, ref_feats, self.config.k_per_frame)
+            refs = [refs[i] for i in top_k_idx]
+            _t_dino_ms = (time.perf_counter() - _t_dino0) * 1000.0
+
         # ── Load query + masks ────────────────────────────────────────────
         img_bgr, fg_mask, interior_mask = self._load_query(query_path)
 
         # ── Match against refs ────────────────────────────────────────────
+        _t_roma0 = time.perf_counter()
         warps, certs, precisions, ok_refs = self._match_all(query_path, refs, fg_mask)
+        _t_roma_ms = (time.perf_counter() - _t_roma0) * 1000.0
         if not warps:
             raise RuntimeError(
                 f"All {len(refs)} refs failed to match for {query_path} "
@@ -142,6 +175,7 @@ class WarpVarianceDetector:
         certs_a = np.stack(certs)
 
         # ── Compute raw signals ───────────────────────────────────────────
+        _t_sig0 = time.perf_counter()
         var_map = CertWeightedStatistics.variance_per_pixel(warps_a, certs_a)
         raw: dict[str, float] = {
             "ivar": CertWeightedStatistics.interior_mean(var_map, interior_mask),
@@ -170,6 +204,7 @@ class WarpVarianceDetector:
 
         # ── Fuse ──────────────────────────────────────────────────────────
         p_combined = self.fuser.fuse(p_per_signal)
+        _t_sig_ms = (time.perf_counter() - _t_sig0) * 1000.0
         H_score = 1.0 - p_combined
         is_h = H_score > self.config.decision_threshold
 
@@ -190,6 +225,10 @@ class WarpVarianceDetector:
             frame_score_max=raw["peak"],
             mean_cert_fg=raw["cert"],
             fg_pixel_count=int(fg_mask.sum()),
+            t_dino_ms   = _t_dino_ms,
+            t_roma_ms   = _t_roma_ms,
+            t_signal_ms = _t_sig_ms,
+            t_total_ms  = (time.perf_counter() - _t0) * 1000.0,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -205,6 +244,32 @@ class WarpVarianceDetector:
         if not task_dir.exists():
             return []
         return sorted(task_dir.glob("*.png"))
+
+    def _get_adaptive_selector(self) -> "Optional[AdaptiveRefSelector]":
+        if not getattr(self.config, "adaptive_ref_selector", False):
+            return None
+        if not _ADAPTIVE_AVAILABLE:
+            raise ImportError(
+                "adaptive_ref_selector=True but warp_score.adaptive_refs not available. "
+                "Check that torch and DINOv2 are installed."
+            )
+        if self._adaptive_selector is None:
+            self._adaptive_selector = AdaptiveRefSelector(
+                DinoFeatureExtractor(getattr(self.config, "dino_model", "dinov2_vits14"))
+            )
+        return self._adaptive_selector
+
+    def _get_ref_feats(self, task: str, refs: list[Path]) -> np.ndarray:
+        if task not in self._ref_feats_cache:
+            selector = self._get_adaptive_selector()
+            dino_cache_dir = getattr(self.config, "dino_cache_dir", None) or (
+                self.config.artifacts_dir / "dino_cache"
+            )
+            feats = selector.load_cache(task, refs, dino_cache_dir)
+            if feats is None:
+                feats = selector.build_cache(task, refs, dino_cache_dir)
+            self._ref_feats_cache[task] = feats
+        return self._ref_feats_cache[task]
 
     def _load_query(
         self, query_path: Path,
@@ -228,28 +293,27 @@ class WarpVarianceDetector:
     def _match_all(
         self, query_path: Path, refs: list[Path], fg_mask: np.ndarray,
     ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[Path]]:
-        warps: list[np.ndarray] = []
-        certs: list[np.ndarray] = []
-        precisions: list[np.ndarray] = []
-        ok_refs: list[Path] = []
-        n_failed = 0
-        for ref_path in refs:
-            try:
-                m = self.matcher.match(query_path, ref_path, fg_mask=fg_mask)
-                warps.append(m.warp)
-                certs.append(m.cert)
-                if m.precision is not None:
-                    precisions.append(m.precision)
-                ok_refs.append(ref_path)
-            except Exception as e:
-                n_failed += 1
-                print(f"[detect] match failed {Path(ref_path).name}: {e}")
-        if n_failed:
-            print(
-                f"[detect] {len(ok_refs)}/{len(refs)} refs matched successfully "
-                f"({n_failed} failed) for {query_path.name}"
-            )
-        return warps, certs, precisions, ok_refs
+        try:
+            results = self.matcher.match_batch(query_path, refs, fg_mask=fg_mask)
+            warps      = [r.warp      for r in results]
+            certs      = [r.cert      for r in results]
+            precisions = [r.precision for r in results if r.precision is not None]
+            return warps, certs, precisions, refs
+        except Exception as e:
+            # Fallback to sequential if batch fails (e.g. OOM)
+            print(f"[detect] match_batch failed ({e}), falling back to sequential")
+            warps, certs, precisions, ok_refs = [], [], [], []
+            for ref_path in refs:
+                try:
+                    m = self.matcher.match(query_path, ref_path, fg_mask=fg_mask)
+                    warps.append(m.warp)
+                    certs.append(m.cert)
+                    if m.precision is not None:
+                        precisions.append(m.precision)
+                    ok_refs.append(ref_path)
+                except Exception as e2:
+                    print(f"[detect] match failed {Path(ref_path).name}: {e2}")
+            return warps, certs, precisions, ok_refs
 
     def _compute_heatmap(
         self,

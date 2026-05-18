@@ -49,6 +49,12 @@ class WarpScoreConfig:
     cycle_consistency: bool = False   # reserved for future cycle-consistent matching
     legacy_ivar: bool = False          # if True, use old ivar+peak+cert+Stouffer pipeline
 
+    # ── Adaptive k-NN reference selection ─────────────────────────────────
+    adaptive_ref_selector: bool = False   # enable per-frame DINOv2 k-NN ref selection
+    k_per_frame: int = 15                 # how many nearest refs to use per query frame
+    dino_model: str = "dinov2_vits14"     # DINOv2 variant (vits14 or vitl14)
+    dino_cache_dir: Optional[Path] = None  # default: artifacts_dir / "dino_cache"
+
     # ── Decision threshold ─────────────────────────────────────────────────
     fpr_alpha: float = 0.05  # H_score > (1 - alpha) → label=1
 
@@ -69,6 +75,8 @@ class WarpScoreConfig:
         self.calib_path = self.artifacts_dir / "calibration.npz"
         self.summary_csv = self.artifacts_dir / "summary.csv"
         self.run_log = self.artifacts_dir / "run.log"
+        if self.dino_cache_dir is not None:
+            self.dino_cache_dir = Path(self.dino_cache_dir)
 
     # ── Decision threshold helper ──────────────────────────────────────────
     @property
@@ -89,8 +97,9 @@ class WarpScoreConfig:
         valid = {f.name for f in fields(cls) if f.init}
         filtered = {k: v for k, v in data.items() if k in valid}
         # Convert string paths to Path
-        for k in ("root_dir", "reference_dir", "query_high_dir", "query_low_dir", "artifacts_dir"):
-            if k in filtered:
+        for k in ("root_dir", "reference_dir", "query_high_dir", "query_low_dir",
+                   "artifacts_dir", "dino_cache_dir"):
+            if k in filtered and filtered[k] is not None:
                 filtered[k] = Path(filtered[k])
         # signal_names: list → tuple
         if "signal_names" in filtered and isinstance(filtered["signal_names"], list):

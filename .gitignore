@@ -159,9 +159,14 @@ artifacts/v9_dreamgen/heatmaps/
 !dreamgen_data/requirements.txt
 !dreamgen_data/setup.sh
 
-# Keep .claude skills directory
+# Keep .claude docs and skills; exclude machine-local state
 !.claude/
 !.claude/**
+.claude/settings.local.json
+.claude/worktrees/
+
+# Test benchmark data — large reference images and cached results
+test/
 
 # Keep warp_score configs (already tracked by default but ensure not ignored)
 !warp_score/

@@ -1,0 +1,18 @@
+# Adaptive k-NN ref selection — k=15, DINOv2 ViT-S/14
+# For each test frame, top-15 nearest refs in DINOv2 feature space are used.
+# Calibration LOO uses the same k-NN policy → consistent chi-squared df=2*(k-1)=28.
+signal_names:
+  - ivar_maha
+  - peak_maha
+fuser: cauchy
+per_pixel_calibration: true
+use_precision: true
+reference_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/reference
+query_high_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/high
+query_low_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/low
+artifacts_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/v9_knn15/results
+n_min_refs: 10
+# Adaptive selection
+adaptive_ref_selector: true
+k_per_frame: 15
+dino_model: dinov2_vits14

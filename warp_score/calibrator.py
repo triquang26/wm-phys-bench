@@ -26,6 +26,12 @@ from .mask import ForegroundMask, InteriorMask
 from .matcher import RoMaMatcher
 from .statistics import CertWeightedStatistics, MahalanobisStatistics
 
+try:
+    from .adaptive_refs import AdaptiveRefSelector
+    _ADAPTIVE_AVAILABLE = True
+except ImportError:
+    _ADAPTIVE_AVAILABLE = False
+
 
 @dataclass
 class TaskCalibration:
@@ -40,6 +46,10 @@ class TaskCalibration:
     evidence_dist: Optional[np.ndarray] = None    # (N,) sorted ascending
     peak_maha_dist: Optional[np.ndarray] = None   # (N,) sorted ascending — peak Z-score of D_map
     T_null: Optional[np.ndarray] = None           # (N, H, W) D_map null, sorted ascending along axis 0
+    # Adaptive k-NN ref selection metadata (None = full-ref baseline)
+    k_per_frame: Optional[int] = None
+    selection_policy: str = "full"               # "full" or "knn"
+    dino_model: Optional[str] = None
 
     @property
     def mean_ivar(self) -> float:
@@ -85,6 +95,9 @@ class CalibrationArtifact:
                 "has_evidence": tc.evidence_dist is not None,
                 "has_peak_maha": tc.peak_maha_dist is not None,
                 "has_T_null": tc.T_null is not None,
+                "k_per_frame": tc.k_per_frame,
+                "selection_policy": tc.selection_policy,
+                "dino_model": tc.dino_model,
             }
             if tc.per_pixel_var is not None:
                 npz_data[f"{slug}__per_pixel_var"] = tc.per_pixel_var.astype(np.float32)
@@ -189,6 +202,9 @@ class CalibrationArtifact:
                 evidence_dist=evidence_dist,
                 peak_maha_dist=peak_maha_dist,
                 T_null=T_null,
+                k_per_frame=task_meta.get("k_per_frame"),
+                selection_policy=task_meta.get("selection_policy", "full"),
+                dino_model=task_meta.get("dino_model"),
             )
 
         global_meta = meta.get("global", {})
@@ -240,10 +256,12 @@ class EmpiricalNullCalibrator:
         matcher: RoMaMatcher,
         interior_mask: InteriorMask,
         config: WarpScoreConfig,
+        adaptive_selector: "Optional[AdaptiveRefSelector]" = None,
     ) -> None:
         self.matcher = matcher
         self.interior = interior_mask
         self.config = config
+        self.adaptive_selector = adaptive_selector
 
     def calibrate(
         self, high_refs_by_task: dict[str, list[Path]],
@@ -290,10 +308,26 @@ class EmpiricalNullCalibrator:
         per_pixel_maps: list[np.ndarray] = []
         T_null_maps: list[np.ndarray] = []
 
+        # Pre-extract DINOv2 features for k-NN LOO (once per task)
+        ref_feats: Optional[np.ndarray] = None
+        if self.adaptive_selector is not None:
+            dino_cache_dir = self.config.dino_cache_dir or (
+                self.config.artifacts_dir / "dino_cache"
+            )
+            ref_feats = self.adaptive_selector.build_cache(task, paths, dino_cache_dir)
+
         for q_idx, query_path in enumerate(
             tqdm(paths, desc=f"  {task[:40]}", leave=False, unit="frame"),
         ):
-            refs = [p for j, p in enumerate(paths) if j != q_idx]
+            if self.adaptive_selector is not None and ref_feats is not None:
+                cand_idx = [j for j in range(n) if j != q_idx]
+                cand_feats = ref_feats[cand_idx]
+                top_k = self.adaptive_selector.select_for_query(
+                    ref_feats[q_idx], cand_feats, self.config.k_per_frame
+                )
+                refs = [paths[cand_idx[i]] for i in top_k]
+            else:
+                refs = [p for j, p in enumerate(paths) if j != q_idx]
             stats = self._stats_for_query(query_path, refs)
             if stats is None:
                 continue
@@ -347,6 +381,9 @@ class EmpiricalNullCalibrator:
             evidence_dist=evidence_arr,
             peak_maha_dist=peak_maha_arr,
             T_null=T_null_arr,
+            k_per_frame=self.config.k_per_frame if self.adaptive_selector else None,
+            selection_policy="knn" if self.adaptive_selector else "full",
+            dino_model=self.adaptive_selector.extractor.model_name if self.adaptive_selector else None,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
