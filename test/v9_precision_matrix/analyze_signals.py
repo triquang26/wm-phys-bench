@@ -281,6 +281,26 @@ def main(args):
     # Max of within-task ranks (both directions contribute)
     h_pt_rank_max = [max(ri, rp) for ri, rp in zip(pt_rank_ivar, pt_rank_peak)]
 
+    # 4-way routing: ivar_ratio override + CV threshold
+    #   ivar_ratio < 1.0 → force peak_maha (signal inverted, e.g. Pepper)
+    #   CV < 0.50        → peak_maha (ivar flat for this task, e.g. Cucumber)
+    #   otherwise        → ivar_maha (discriminative with good CV spread)
+    CV4_LOW = 0.50
+    task_ivar_ratio: dict[str, float] = {}
+    for task in sorted(task_to_indices.keys()):
+        null_mean = get_null_mean(task, "ivar_maha")
+        test_mean = float(np.mean(task_to_ivar_vals[task]))
+        task_ivar_ratio[task] = (test_mean / null_mean) if null_mean else 1.0
+
+    h_adaptive_4way = []
+    for (task, split, frame), ri, rp in zip(keys, pt_rank_ivar, pt_rank_peak):
+        ratio = task_ivar_ratio[task]
+        cv = float(np.std(task_to_ivar_vals[task])) / max(float(np.mean(task_to_ivar_vals[task])), 1e-8)
+        if ratio < 1.0 or cv < CV4_LOW:  # inverted or flat → peak_maha
+            h_adaptive_4way.append(rp)
+        else:                             # discriminative ivar → ivar_maha
+            h_adaptive_4way.append(ri)
+
     # Oracle: per-task, per-signal AUROC → choose best signal per task
     # (upper bound — uses labels, not usable at inference time)
     task_oracle_signal: dict[str, str] = {}
@@ -352,6 +372,7 @@ def main(args):
         "adaptive: raw (calib-routed)":     h_adaptive_raw,
         "adaptive: pt_rank (calib-routed)": h_adaptive_pt_rank,
         "adaptive: pt_rank 3way":           h_adaptive_3way,
+        "adaptive: pt_rank 4way (ratio+CV)": h_adaptive_4way,
         "ORACLE: raw (labels)":             h_oracle,
         "ORACLE: pt_rank (labels)":         h_oracle_pt,
     }
