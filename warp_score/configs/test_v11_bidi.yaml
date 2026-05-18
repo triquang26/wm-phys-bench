@@ -1,0 +1,20 @@
+# v11: Bidirectional RoMa + adaptive k-NN refs (k=15)
+# Bidirectional matching checks Q→R and R→Q consistency.
+# Clean frames: warp(Q→R) ≈ inverse(warp(R→Q)) → symmetric, low D_map
+# Hallu frames: break this symmetry → higher D_map → stronger signal
+signal_names:
+  - ivar_maha
+  - peak_maha
+fuser: cauchy
+per_pixel_calibration: true
+use_precision: true
+bidirectional: true
+reference_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/reference
+query_high_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/high
+query_low_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/query/low
+artifacts_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/test/v11_bidi/results
+n_min_refs: 10
+# Adaptive selection
+adaptive_ref_selector: true
+k_per_frame: 15
+dino_model: dinov2_vits14
