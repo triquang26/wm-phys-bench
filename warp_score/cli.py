@@ -68,10 +68,21 @@ def calibrate_cmd(args: argparse.Namespace) -> None:
         bidirectional=cfg.bidirectional,
         vis_size=cfg.vis_size,
     )
+    adaptive_selector = None
+    if getattr(cfg, "adaptive_ref_selector", False):
+        from .adaptive_refs import AdaptiveRefSelector, DinoFeatureExtractor
+        adaptive_selector = AdaptiveRefSelector(
+            DinoFeatureExtractor(getattr(cfg, "dino_model", "dinov2_vits14"))
+        )
+        logger.info(
+            f"Adaptive k-NN ref selection enabled: k={cfg.k_per_frame}, "
+            f"model={cfg.dino_model}"
+        )
     calibrator = EmpiricalNullCalibrator(
         matcher=matcher,
         interior_mask=InteriorMask(cfg.erosion_k),
         config=cfg,
+        adaptive_selector=adaptive_selector,
     )
 
     artifact = calibrator.calibrate(high_refs)

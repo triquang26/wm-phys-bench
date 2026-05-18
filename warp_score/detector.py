@@ -24,6 +24,12 @@ from .matcher import RoMaMatcher
 from .signals import Signal, per_pixel_p_value
 from .statistics import CertWeightedStatistics, MahalanobisStatistics
 
+try:
+    from .adaptive_refs import AdaptiveRefSelector, DinoFeatureExtractor
+    _ADAPTIVE_AVAILABLE = True
+except ImportError:
+    _ADAPTIVE_AVAILABLE = False
+
 
 @dataclass
 class HallucinationResult:
@@ -106,6 +112,8 @@ class WarpVarianceDetector:
         self.fuser = fuser
         self.signals = signals
         self.interior = interior_mask
+        self._adaptive_selector: "Optional[AdaptiveRefSelector]" = None
+        self._ref_feats_cache: dict[str, np.ndarray] = {}
 
     def detect(
         self,
@@ -126,6 +134,14 @@ class WarpVarianceDetector:
         refs = refs if refs is not None else self._discover_refs(task)
         if not refs:
             raise RuntimeError(f"No refs found for task '{task}'")
+
+        # ── Adaptive k-NN ref selection (speed-invariant task-state conditioning) ─
+        selector = self._get_adaptive_selector()
+        if selector is not None:
+            ref_feats = self._get_ref_feats(task, refs)
+            query_feat = selector.extractor.extract([query_path])[0]
+            top_k_idx = selector.select_for_query(query_feat, ref_feats, self.config.k_per_frame)
+            refs = [refs[i] for i in top_k_idx]
 
         # ── Load query + masks ────────────────────────────────────────────
         img_bgr, fg_mask, interior_mask = self._load_query(query_path)
@@ -205,6 +221,32 @@ class WarpVarianceDetector:
         if not task_dir.exists():
             return []
         return sorted(task_dir.glob("*.png"))
+
+    def _get_adaptive_selector(self) -> "Optional[AdaptiveRefSelector]":
+        if not getattr(self.config, "adaptive_ref_selector", False):
+            return None
+        if not _ADAPTIVE_AVAILABLE:
+            raise ImportError(
+                "adaptive_ref_selector=True but warp_score.adaptive_refs not available. "
+                "Check that torch and DINOv2 are installed."
+            )
+        if self._adaptive_selector is None:
+            self._adaptive_selector = AdaptiveRefSelector(
+                DinoFeatureExtractor(getattr(self.config, "dino_model", "dinov2_vits14"))
+            )
+        return self._adaptive_selector
+
+    def _get_ref_feats(self, task: str, refs: list[Path]) -> np.ndarray:
+        if task not in self._ref_feats_cache:
+            selector = self._get_adaptive_selector()
+            dino_cache_dir = getattr(self.config, "dino_cache_dir", None) or (
+                self.config.artifacts_dir / "dino_cache"
+            )
+            feats = selector.load_cache(task, refs, dino_cache_dir)
+            if feats is None:
+                feats = selector.build_cache(task, refs, dino_cache_dir)
+            self._ref_feats_cache[task] = feats
+        return self._ref_feats_cache[task]
 
     def _load_query(
         self, query_path: Path,
