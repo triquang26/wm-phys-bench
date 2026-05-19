@@ -147,14 +147,23 @@ class VideoScorer:
         k_per_frame: int = 50,
         threshold: float = 0.5,
         cert_floor: float = 0.1,
+        sam_segment: bool = True,
     ) -> None:
+        """
+        sam_segment: when True, SAM3-segments each frame before scoring so the
+                     test frames match the reference pool's segmented style
+                     (bg = (127, 127, 127)). The reference pool was SAM3-built
+                     so leaving this False produces unreliable DINOv2 NN.
+        """
         self.cache = cache
         self.device = device
         self.k_per_frame = k_per_frame
         self.threshold = threshold
         self.cert_floor = cert_floor
+        self.sam_segment = sam_segment
         self._matcher = None
         self._dino = None
+        self._sam = None
 
     @classmethod
     def from_cache(cls, cache_dir: Path | str, **kwargs) -> "VideoScorer":
@@ -177,6 +186,12 @@ class VideoScorer:
             self._dino = DinoFeatureExtractor("dinov2_vits14")
             self._dino._load()
         return self._dino
+
+    def _get_sam(self):
+        if self._sam is None and self.sam_segment:
+            from .sam_segmenter import VideoFrameSegmenter
+            self._sam = VideoFrameSegmenter()
+        return self._sam
 
     # ─────────────────────────────────────────────────────────────────────
 
@@ -238,12 +253,18 @@ class VideoScorer:
         if len(frames) < 2:
             raise RuntimeError(f"Need at least 2 frames; got {len(frames)} from {video_path}")
 
+        # ── Optional SAM3 segmentation so test frames match pool style
+        if self.sam_segment and frame_dir is None:
+            sam = self._get_sam()
+            frames = [(idx, sam.segment_frame(bgr), src) for (idx, bgr, src) in frames]
+
         # ── Cache frames to tmp .png so RoMa can load them
         import tempfile
         tmp = Path(tempfile.mkdtemp(prefix="warpdyn_"))
         frame_paths: list[Path] = []
         for i, (idx, bgr, src) in enumerate(frames):
-            if src is not None:
+            if src is not None and not self.sam_segment:
+                # Already on disk and we're not modifying — point to it
                 frame_paths.append(src)
             else:
                 p = tmp / f"frame_{i:04d}.png"
