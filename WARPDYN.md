@@ -107,11 +107,37 @@ python scripts/run_warpdyn_v2.py
 # Compile mọi thứ vào portable cache
 python scripts/build_reference_cache.py
 # → paper-physical-gr1/ref_cache/  (~5 MB)
-
-# Pick optimal threshold via Youden's J (cần ≥ 1 batch eval videos đã chấm nhãn)
-python scripts/calibrate_threshold.py
-# → paper-physical-gr1/ref_cache/threshold.json
 ```
+
+**Chọn 1 trong 2 cách calibrate threshold:**
+
+#### Cách 1 — Youden's J (cần labeled batch: cả real + generated)
+
+```bash
+python scripts/calibrate_threshold.py
+# → threshold.json  (mode="youden_j", threshold=0.924 cho GR1)
+```
+
+Tối ưu (TPR - FPR). Cần đã có ≥ 5 real + ≥ 10 gen videos đã gắn nhãn.
+
+#### Cách 2 — Conformal (CHỈ cần real training videos, không cần gen)
+
+```bash
+python scripts/calibrate_threshold_unlabeled.py \
+    --frame_dirs paper-physical-gr1/reference/ \
+    --target_fpr 0.05 \
+    --max_videos 50
+# → threshold.json (mode="conformal_unlabeled", FPR ≤ 5% guarantee)
+```
+
+Statistical guarantee: **FPR ≤ target_fpr** by construction. Không quan tâm phân bố của gen. Phù hợp khi:
+- Chưa có generated video nào để label
+- Cần work cho generator mới chưa thấy (model robustness)
+- Muốn conservative threshold (low false alarm)
+
+Trade-off: không biết TPR — nếu real/gen overlap quá nhiều thì TPR có thể thấp. Nhưng FPR control chặt.
+
+**Cả 2 đều ghi vào cùng `threshold.json` trong cache** — VideoScorer auto-load.
 
 Sau bước này, **ref_cache là deployable**. Copy folder này đến machine production là dùng được.
 
