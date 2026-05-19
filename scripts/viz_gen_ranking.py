@@ -99,19 +99,40 @@ def score_pairs_with_heatmap(seg_paths: list[Path], matcher, cycle_sig) -> list[
 
 def overlay_heatmap_on_frame(frame_bgr: np.ndarray,
                               heatmap: np.ndarray,
+                              cert: Optional[np.ndarray] = None,
+                              cert_floor: float = 0.1,
                               alpha: float = 0.6,
                               vmin: float = 0.0,
                               vmax: float = 30.0,
                               ) -> np.ndarray:
-    """Overlay heatmap (cycle drift in pixels) on the frame with red colormap."""
+    """Overlay heatmap (cycle drift) on frame, MASKED by RoMa cert.
+
+    Background / uniform-texture pixels (cert < cert_floor) → heatmap
+    suppressed to 0 so the visualization matches the actual signal
+    aggregation. Without this masking the background looks "bright"
+    because RoMa's warp on textureless regions is arbitrary and the
+    cycle composition there is noisy — but those pixels are NOT used
+    in the score computation.
+    """
+    H, W = heatmap.shape
     h_clipped = np.clip(heatmap, vmin, vmax)
     h_norm = (h_clipped - vmin) / max(vmax - vmin, 1e-6)
-    # Frame to vis_size
-    H, W = heatmap.shape
+
+    if cert is not None:
+        # Sample cert to heatmap resolution, then zero out low-cert pixels
+        cert_r = cv2.resize(cert.astype(np.float32), (W, H),
+                            interpolation=cv2.INTER_LINEAR)
+        mask = (cert_r > cert_floor).astype(np.float32)
+        h_norm = h_norm * mask
+
     frame_r = cv2.resize(frame_bgr, (W, H), interpolation=cv2.INTER_LINEAR)
-    # Colormap (hot)
     colored = cv2.applyColorMap((h_norm * 255).astype(np.uint8), cv2.COLORMAP_HOT)
-    overlay = cv2.addWeighted(frame_r, 1.0 - alpha, colored, alpha, 0)
+    # Only blend where mask is non-zero (so frame shows through on bg)
+    if cert is not None:
+        alpha_map = (h_norm > 0.001)[..., None].astype(np.float32) * alpha
+        overlay = (frame_r * (1 - alpha_map) + colored * alpha_map).astype(np.uint8)
+    else:
+        overlay = cv2.addWeighted(frame_r, 1.0 - alpha, colored, alpha, 0)
     return overlay
 
 
@@ -150,7 +171,9 @@ def make_per_video_card(video_label: str,
     # Row 2: cycle heatmaps (between f_t and f_{t+1})
     for t, pd in enumerate(pair_data):
         ax = fig.add_subplot(gs[1, t])
-        overlay = overlay_heatmap_on_frame(seg_bgrs[t], pd["drift_map"], alpha=0.6)
+        overlay = overlay_heatmap_on_frame(seg_bgrs[t], pd["drift_map"],
+                                            cert=pd["cert_fwd"], cert_floor=0.1,
+                                            alpha=0.6)
         ax.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
         ax.set_title(f"f{t}→{t+1}", fontsize=8)
         ax.axis("off")
@@ -218,7 +241,9 @@ def make_task_comparison(task: str,
             if i < len(seg_bgrs):
                 if i < len(pair_data):
                     overlay = overlay_heatmap_on_frame(
-                        seg_bgrs[i], pair_data[i]["drift_map"], alpha=0.5
+                        seg_bgrs[i], pair_data[i]["drift_map"],
+                        cert=pair_data[i]["cert_fwd"], cert_floor=0.1,
+                        alpha=0.5,
                     )
                     ax.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
                 else:
