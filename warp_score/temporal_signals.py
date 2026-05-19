@@ -183,28 +183,118 @@ class PrecisionAnomalySignal(TemporalSignal):
         cycle drift WHILE RoMa stays falsely confident (mid-to-high precision).
         Per-pixel score = cycle × sqrt(precision_det) suppresses real motion
         (low precision compensates) and amplifies generator artifacts.
-
-    Per-pixel score:
-        s(x,y) = cycle_drift(x,y) × sqrt(det(precision_fwd(x,y))) / norm_factor
-
-    where norm_factor is the 99th-percentile of sqrt(det) on the SAME frame
-    (so the signal is scale-invariant to overall RoMa confidence level).
     """
     name = "precision_anomaly"
 
     def _per_pixel_score(self, match_fwd, match_bwd) -> np.ndarray:
         cycle = cycle_error_map(match_fwd.warp, match_bwd.warp)
         if match_fwd.precision is None:
-            # Fallback: use cert directly if precision unavailable
             conf = match_fwd.cert.astype(np.float32)
         else:
             det = precision_det(match_fwd.precision)
             conf = np.sqrt(det).astype(np.float32)
-            # Self-normalize so the signal doesn't depend on absolute precision scale
             ref = float(np.percentile(conf, 99.0))
             if ref > 1e-8:
                 conf = np.clip(conf / ref, 0, 1)
         return cycle * conf
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LostPixelSignal — "if a point can't be found, it's likely hallu"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class LostPixelSignal(TemporalSignal):
+    """Fraction of interior pixels where the match is unreliable ("lost").
+
+    Per-pixel a pixel is "lost" if RoMa cannot find a sharp correspondence
+    in the next frame — operationalized via:
+        cert(x,y) < cert_thresh   OR   sqrt(det(precision(x,y))) < prec_thresh
+
+    Motivation (user's intuition):
+        For a real consecutive pair, even with motion most pixels can be
+        tracked into the next frame (background stays, the moving robot
+        arm still has a unique destination). For a generated pair with
+        textural artifacts or object morphing, many pixels have NO clean
+        correspondence — RoMa returns diffuse / low-confidence matches.
+
+    Outputs:
+        mean = global fraction of lost pixels (in interior)
+        peak = max 16×16 block density of lost pixels (clustered failure)
+    """
+    name = "lost_pixel"
+
+    def __init__(self,
+                 cert_thresh: float = 0.3,
+                 prec_thresh: float = 0.10,
+                 block_size: int = 16):
+        # cert_floor=0 because we *want* the low-cert pixels here
+        super().__init__(cert_floor=0.0)
+        self.cert_thresh = cert_thresh
+        self.prec_thresh = prec_thresh
+        self.block_size = block_size
+
+    def _per_pixel_score(self, match_fwd, match_bwd) -> np.ndarray:
+        cert = match_fwd.cert.astype(np.float32)
+        lost = cert < self.cert_thresh
+        if match_fwd.precision is not None:
+            det = precision_det(match_fwd.precision)
+            prec_norm = np.sqrt(det).astype(np.float32)
+            ref = float(np.percentile(prec_norm, 99.0))
+            if ref > 1e-8:
+                prec_norm = prec_norm / ref
+            lost |= (prec_norm < self.prec_thresh)
+        return lost.astype(np.float32)
+
+    def _validity_mask(self, match_fwd, interior_mask):
+        H, W = match_fwd.cert.shape
+        return (interior_mask if interior_mask is not None
+                else np.ones((H, W), dtype=bool))
+
+    def _aggregate(self, score_map, weights, valid):
+        if not valid.any():
+            return 0.0, 0.0
+        rate = float(score_map[valid].mean())
+        # Local clustering peak: max-mean over BxB blocks
+        H, W = score_map.shape
+        b = self.block_size
+        hb, wb = H // b, W // b
+        if hb > 0 and wb > 0:
+            cropped = (score_map * valid.astype(np.float32))[:hb * b, :wb * b]
+            blocks = cropped.reshape(hb, b, wb, b).mean(axis=(1, 3))
+            peak = float(blocks.max())
+        else:
+            peak = rate
+        return rate, peak
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BidirectionalCertSignal — fwd cert high but bwd cert at destination low
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BidirectionalCertSignal(TemporalSignal):
+    """Asymmetric match confidence: forward high, backward at destination low.
+
+    Per-pixel score:
+        s(x,y) = max(0, cert_fwd(x,y) - cert_bwd(warp_fwd(x,y)))
+
+    Real bidirectional matches: cert_fwd ≈ cert_bwd at destination → s ≈ 0.
+    Generator artifacts often break this symmetry — forward looks plausible
+    but the destination pixel doesn't think it maps back to (x,y).
+    """
+    name = "biduri_cert"
+
+    def _per_pixel_score(self, match_fwd, match_bwd) -> np.ndarray:
+        fwd_px = _norm_to_pixel(match_fwd.warp)
+        bwd_cert_at_dest = cv2.remap(
+            match_bwd.cert.astype(np.float32),
+            fwd_px[..., 0].astype(np.float32),
+            fwd_px[..., 1].astype(np.float32),
+            cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0.0,
+        )
+        discrepancy = np.clip(match_fwd.cert.astype(np.float32) - bwd_cert_at_dest, 0, 1)
+        return discrepancy
 
 
 # ─────────────────────────────────────────────────────────────────────────────
