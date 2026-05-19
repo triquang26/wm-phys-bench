@@ -48,7 +48,7 @@ EVAL_TASKS = [
     "6_Use the right hand to pick up orange from middle of table to bottom white shelf.",
 ]
 
-NULL_LAGS = [1, 2, 3, 4, 5, 6, 8, 10, 15]   # 9 lags → ~410 null pairs per task
+NULL_LAGS = [1, 2, 5, 10]   # 4 lags → ~182 pairs per task; 9-lag tried, no AUROC gain
 N_TEST_FRAMES = 10
 
 

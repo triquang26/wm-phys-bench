@@ -1,304 +1,397 @@
-# WarpDyn — Per-task multi-lag null (recommended method)
+# WarpDyn — Per-task multi-lag null (production method)
 
-Anomaly detection cho robot video bằng RoMa cycle composition error.
-Null distribution **per-task, multi-lag** — bảo đảm real training video không bị flag.
+Hallucination / anomaly detection cho robot video bằng RoMa feature matching.
+Per-task null distribution + multi-lag sampling → bảo đảm real training video không bị flag, capture được generator artifacts.
 
-**Kết quả GR1 (5 tasks, 5 real + 24 gen):**
-- All real training videos: H_peak ≤ **0.832**
-- Set threshold = 0.832 → **FPR = 0% guaranteed**
-- 16/24 gen videos above threshold (67% catch rate) — informative
-- Overall AUROC = **0.767**
-
----
-
-## 1. Flow tổng thể
-
-```
-═══════════════════════════════════════════════════════════════════
-OFFLINE (1 lần per task)
-═══════════════════════════════════════════════════════════════════
-
-   Real training video task T (.mp4)
-              │
-              ▼
-   Extract 50 frames evenly + SAM3 segment
-              │
-              ▼
-   reference/<task_T>/frame_NNNN.png   (50 frames per task)
-              │
-              ▼
-   Build per-task null:
-     - For lag ∈ {1, 2, 5, 10}:
-         For each i: pair = (frame[i], frame[i+lag])
-         compute cycle_signal(fwd, bwd) → (mean, peak)
-     - Total ~182 pairs per task
-     - Sort into null_cycle_mean[], null_cycle_peak[]
-              │
-              ▼
-   Save: null_per_task/<task_T>.npz
-
-═══════════════════════════════════════════════════════════════════
-INFERENCE (mỗi video query)
-═══════════════════════════════════════════════════════════════════
-
-   Query video.mp4 + task_id   ← (cần biết task của query)
-              │
-              ▼
-   Sample 10 frames via np.linspace(0, total-1, 10)
-              │
-              ▼
-   SAM3 segment mỗi frame (background → (127,127,127))
-              │
-              ▼
-   For 9 consecutive pairs (frame_t, frame_{t+1}):
-     fwd = RoMa(frame_t  → frame_{t+1})
-     bwd = RoMa(frame_{t+1} → frame_t)
-     cycle = CycleSignal().compute(fwd, bwd)
-     → (mean, peak) per pair
-              │
-              ▼
-   Load null_per_task/<task_id>.npz
-              │
-              ▼
-   For each pair:
-     p_mean = empirical_p(pair.mean, null_cycle_mean)
-     p_peak = empirical_p(pair.peak, null_cycle_peak)
-     p_pair = Cauchy(p_mean, p_peak)
-     H_pair = 1 - p_pair
-              │
-              ▼
-   H_video = np.percentile(H_pairs, 80)    ← 80th percentile peak
-              │
-              ▼
-   Decision: H_video > 0.832 ? HALLU : CLEAN
-                 (threshold = max(real_train) + ε per task)
-```
+**Kết quả GR1** (5 tasks, multi-lag null 9 lags, ~410 pairs/task):
+- Real max H_peak = **0.832** → set threshold = 0.832 cho FPR = 0%
+- 16-18/24 generated videos flagged tùy aggregator (cycle peak / per-task ratio)
+- AUROC = 0.77 (cycle peak), 0.81 với ratio score
 
 ---
 
-## 2. Sample sizes & lags
+## 1. Hai pipeline tách biệt: OFFLINE và ONLINE
 
-### Null calibration (mỗi task)
+```
+═════════════════════════════════════════════════════════════════════
+                        ┌── OFFLINE (mỗi task, 1 lần) ──┐
+                        │                                │
+                        │   Build per-task null         │
+                        │   + threshold calibration     │
+                        │                                │
+                        └──────────────┬─────────────────┘
+                                       │
+                                       ▼
+                            null_per_task/<T>.npz
+                                       │
+                                       ▼
+                        ┌── ONLINE (mỗi query video) ──┐
+                        │                                │
+                        │   Score against per-task null │
+                        │   → continuous H_peak ∈ [0,1] │
+                        │                                │
+                        └────────────────────────────────┘
+═════════════════════════════════════════════════════════════════════
+```
 
-| Lag | # pairs từ 50 frames | Cover loại motion |
-|---|---|---|
-| 1 | 49 | Very slow (frame liền kề) |
-| 2 | 48 | Slow |
-| 5 | 45 | Medium (≈ inference lag) |
-| 10 | 40 | Fast (lag lớn) |
-| **Total** | **~182** | **Spectrum đầy đủ** |
-
-Vì sao multi-lag: video query sample 10 frames từ ~120 total → lag ≈ 12. Null phải có pairs ở lag tương đương ĐỂ cycle drift comparable. Multi-lag {1,2,5,10} cover toàn spectrum → real video query không nằm tail giả tạo.
-
-### Test sampling (mỗi query)
-
-- 10 frames, `np.linspace(0, total_frames-1, 10)`
-- 9 consecutive pairs → 9 H_pair values
-- 80th percentile → H_video (sensitive với ≥1-2 bad pair nhưng không bị 1-frame noise phá)
+OFFLINE chạy **1 lần per task** (~5-10 min/task), output là cache nhỏ (~1 KB).
+ONLINE chấm 1 video ~10 sec với cache đó.
 
 ---
 
-## 3. Signal CycleSignal — công thức
+## 2. OFFLINE — Build null cho 1 task T
+
+### Step O1: Sample reference frames từ training video
+
+Input: real training video của task T (`.mp4`)
 
 ```
-Input:  fwd  = RoMa(frame_t → frame_{t+1})  → warp_fwd, cert_fwd
-        bwd  = RoMa(frame_{t+1} → frame_t)  → warp_bwd
+For one training video V at task T:
+  total_frames = read_mp4(V).num_frames
+  ref_indices = np.linspace(0, total_frames - 1, 50)  # 50 frames evenly
+  ref_bgrs = [read_frame(V, i) for i in ref_indices]
+```
 
-For each pixel (x,y) of frame_t:
-  (u,v)  = warp_fwd[y,x]                    # land in frame_{t+1}
-  (x',y') = bilinear_sample(warp_bwd, (u,v)) # back to frame_t
-  cycle_drift[y,x] = ||(x',y') - (x,y)||    # pixel units
+→ 50 raw BGR frames.
 
-Filter:  valid = cert_fwd > 0.1            # drop uniform-texture (cube faces)
+### Step O2: SAM3 segment mỗi reference frame
+
+```
+For each bgr in ref_bgrs:
+  seg_bgr = SAM3(bgr, prompts=["robot arm", "robotic hand", "gripper"])
+  # Background → (127, 127, 127), foreground giữ nguyên
+  save_to: reference/<task_T>/frame_NNNN.png
+```
+
+→ 50 segmented PNG files.
+
+**Vì sao SAM3:** Bỏ background bias. RoMa matching focus vào robot + objects, không bị cluttered scene.
+
+### Step O3: Build multi-lag pair list
+
+Với 50 reference frames, build pairs ở 9 lags:
+
+```
+NULL_LAGS = [1, 2, 5, 10]
+
+pairs = []
+for lag in NULL_LAGS:
+    n_pairs_this_lag = 50 - lag
+    for i in range(n_pairs_this_lag):
+        pairs.append( (ref[i], ref[i + lag]) )
+
+Tổng pairs per task:
+  49 + 48 + 45 + 40 = 182 pairs
+```
+
+**Vì sao multi-lag:**
+- lag=1: motion rất nhỏ (frames liền kề)
+- lag=10: motion lớn (frames cách xa)
+- Inference sample 10 frames từ ~120-total → lag effective ≈ 12 → null phải có pairs ở lag tương đương để cycle drift comparable
+- 4 lags {1, 2, 5, 10} cover spectrum đầy đủ và best AUROC theo experiment
+
+**Lưu ý:** đã thử thêm lags ({1,2,3,4,5,6,8,10,15}) → 410 pairs nhưng AUROC giảm 0.767 → 0.750. Cả real và gen H scale xuống cùng → net wash. **4-lag là sweet spot.**
+
+### Step O4: Compute cycle signal cho mỗi pair
+
+```
+For each (frame_a, frame_b) in pairs:
+  fwd = RoMa.match(frame_a, frame_b)   # (H,W,2) warp + (H,W) cert
+  bwd = RoMa.match(frame_b, frame_a)
+  sig = CycleSignal().compute(fwd, bwd)
+  null_means.append(sig.mean)
+  null_peaks.append(sig.peak)
+
+Sort both arrays:
+  null_mean = np.sort(null_means)
+  null_peak = np.sort(null_peaks)
+```
+
+### Step O5: Score training video V để xác định ngưỡng
+
+```
+training_pairs = []
+training_indices = np.linspace(0, total_frames - 1, 10)  # match inference sampling
+for i in training_indices:
+    frame_i_seg = SAM3(read_frame(V, i))
+    training_frames.append(frame_i_seg)
+
+for t in range(9):
+    fwd = RoMa(training_frames[t], training_frames[t+1])
+    bwd = RoMa(training_frames[t+1], training_frames[t])
+    sig = CycleSignal().compute(fwd, bwd)
+    p_mean = empirical_p(sig.mean, null_mean)
+    p_peak = empirical_p(sig.peak, null_peak)
+    p_pair = Cauchy(p_mean, p_peak)
+    H_pair_training.append(1 - p_pair)
+
+H_train_task = np.percentile(H_pair_training, 80)   # 80th-percentile aggregator
+```
+
+`H_train_task` ∈ [0, 1] = "anomaly level" của training video so với chính null của nó. **Set this là baseline cho task T.**
+
+### Step O6: Save cache cho task T
+
+```
+np.savez(f"null_per_task/{task_T}.npz",
+         null_mean   = null_mean,           # ~396 sorted floats
+         null_peak   = null_peak,           # ~396 sorted floats
+         H_train     = H_train_task,        # scalar baseline
+         training_video = str(V))           # provenance
+```
+
+→ Compact cache (~10 KB) ready để serve inference.
+
+---
+
+## 3. ONLINE — Score 1 query video
+
+### Step N1: Identify task của query
+
+Cần biết query thuộc task nào để load đúng null. 3 cách:
+- **User-provided** (recommended): `task_id` truyền vào API
+- **Auto-classify**: DINOv2 embedding của 1 query frame → nearest task centroid
+- **Multi-score**: chấm với mọi task null → lấy min H (best-match task)
+
+```
+task_T = identify_task(query_video)
+null   = load(f"null_per_task/{task_T}.npz")
+```
+
+### Step N2: Sample N frames từ query
+
+```
+total = read_mp4(query).num_frames
+indices = np.linspace(0, total - 1, n_frames=10)
+bgrs = [read_frame(query, i) for i in indices]
+```
+
+→ 10 raw BGR frames.
+
+### Step N3: SAM3 segment mỗi frame
+
+```
+seg_bgrs = [SAM3(b) for b in bgrs]
+```
+
+→ 10 segmented frames, same style as null pool.
+
+### Step N4: RoMa per consecutive pair + cycle signal
+
+```
+H_pairs = []
+for t in range(9):                                  # 9 consecutive pairs
+    fwd = RoMa.match(seg_bgrs[t],   seg_bgrs[t+1])
+    bwd = RoMa.match(seg_bgrs[t+1], seg_bgrs[t])
+    sig = CycleSignal().compute(fwd, bwd)
+    # Empirical p-value vs null:
+    p_mean = empirical_p(sig.mean, null["null_mean"])
+    p_peak = empirical_p(sig.peak, null["null_peak"])
+    p_pair = Cauchy_combine(p_mean, p_peak)
+    H_pairs.append(1 - p_pair)
+```
+
+Mỗi `H_pair` ∈ [0, 1] = anomaly score của pair đó so với null distribution của task T.
+
+### Step N5: Aggregate per-video
+
+```
+H_video_peak = np.percentile(H_pairs, 80)   # robust peak, ignores 1-frame noise
+```
+
+Tại sao `p80` thay max:
+- max sensitive với single outlier frame (motion blur, occlusion)
+- mean dilute tín hiệu nếu chỉ vài frames hallu
+- p80: catch "≥ 1-2 hallu pairs" nhưng resistant với 1-frame noise
+
+### Step N6: Quyết định binary (optional)
+
+**Option A — Global threshold** (FPR=0% trên 5 tasks đã eval):
+```
+is_hallu = H_video_peak > 0.832
+```
+
+**Option B — Per-task ratio** (recommended, FPR=0% by construction):
+```
+ratio = H_video_peak / null["H_train"]
+verdict = "HALLU"      if ratio > 1.00
+          "borderline" if ratio > 0.95
+          "clean"      otherwise
+```
+
+Per-task ratio = "video này anomalous gấp X lần training video cùng task". Tự calibrate khi thêm task mới.
+
+---
+
+## 4. Công thức chi tiết
+
+### CycleSignal
+
+```
+Input:  warp_fwd (H,W,2), cert_fwd (H,W)   from RoMa(frame_a → frame_b)
+        warp_bwd (H,W,2), cert_bwd (H,W)   from RoMa(frame_b → frame_a)
+
+Per pixel (x,y) trong frame_a:
+  (u, v)   = pixel_coord(warp_fwd[y,x])           # land in frame_b
+  (x',y')  = bilinear_sample(warp_bwd, (u,v))     # back in frame_a
+  drift    = ||(x',y') - (x,y)||                  # in pixel units
+
+Filter: valid = (cert_fwd > 0.1) AND interior_mask
+
 Aggregate:
-  mean = cert_fwd-weighted average của cycle_drift trong valid pixels
-  peak = 99th percentile của cycle_drift trong valid pixels
+  mean = (Σ drift × cert × valid) / (Σ cert × valid)   # cert-weighted
+  peak = percentile(drift[valid], 99)                  # tail anomaly
 
-Output:  (mean, peak)
+Output: (mean, peak)
 ```
 
-Real video → cycle drift nhỏ (consecutive frames coherent về physics).
-Generator artifact → cycle drift lớn (texture flicker, ghost objects, frame-to-frame inconsistency).
+### Empirical p-value
+
+```
+def empirical_p(value, sorted_null):
+    n = len(sorted_null)
+    rank = np.searchsorted(sorted_null, value, side="right")
+    p = (n - rank + 0.5) / (n + 1)
+    return clip(p, 1/(n+1), 1 - 1/(n+1))    # avoid 0 or 1 exactly
+```
+
+### Cauchy combine (ACAT)
+
+```
+def cauchy_combine(p_list):
+    valid = [p for p in p_list if 0 < p < 1]
+    T = mean(tan(pi * (0.5 - p)) for p in valid)
+    p_combined = 0.5 - arctan(T) / pi
+    return p_combined
+```
+
+Robust hơn Fisher khi p-values correlate (mean và peak từ cùng pair có correlation).
 
 ---
 
-## 4. Empirical p-value + Cauchy fusion
+## 5. Sample sizes (5 tasks GR1)
 
-```
-p_mean = (n - rank(value, null_cycle_mean)) / (n + 1)   # right-tail p
-p_peak = (n - rank(value, null_cycle_peak)) / (n + 1)
-
-Clip:  p ∈ [1/(n+1), 1-1/(n+1)]  để tránh Cauchy blow-up
-
-Cauchy combine (ACAT):
-  T = mean(tan(π·(0.5 - p_i)))
-  p_combined = 0.5 - arctan(T)/π
-
-H_pair = 1 - p_combined ∈ [0, 1]
-```
-
-`p_combined` gần 0 → tail anomalous → H_pair gần 1.
+| Item | Count | Time (one-shot) |
+|---|---|---|
+| Reference frames per task | 50 | SAM3 ~30 sec |
+| Multi-lag pairs per task | ~396 | RoMa ~7 min |
+| Training videos per task | 1 | included above |
+| H_train computation | 9 pairs | ~10 sec |
+| **Total offline per task** | | **~8-10 min** |
+| Frames per query | 10 | sample ~0.5 sec |
+| Pairs per query | 9 | RoMa ~5 sec |
+| **Total online per video** | | **~8-10 sec** |
 
 ---
 
-## 5. Code skeleton
+## 6. Threshold strategies
 
-```python
-from warp_score.temporal_signals import CycleSignal, empirical_p_value
-from warp_score.matcher import RoMaMatcher
-from warp_score.sam_segmenter import VideoFrameSegmenter
-import numpy as np, cv2
-
-# Setup
-matcher = RoMaMatcher(setting="turbo", device="cuda", use_precision=True)
-matcher._load_model()
-seg = VideoFrameSegmenter()
-cycle = CycleSignal(cert_floor=0.1)
-
-# ─── Offline: build null for one task ───
-def build_per_task_null(ref_pngs, lags=(1, 2, 5, 10)):
-    means, peaks = [], []
-    for lag in lags:
-        for i in range(len(ref_pngs) - lag):
-            fwd = matcher.match(ref_pngs[i],   ref_pngs[i+lag])
-            bwd = matcher.match(ref_pngs[i+lag], ref_pngs[i])
-            sig = cycle.compute(fwd, bwd)
-            means.append(sig.mean)
-            peaks.append(sig.peak)
-    return np.sort(means), np.sort(peaks)
-
-# ─── Online: score a video ───
-def score_video(mp4_path, null_mean, null_peak, threshold=0.832):
-    # 1. Sample 10 frames evenly
-    cap = cv2.VideoCapture(str(mp4_path))
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    idx = np.linspace(0, total-1, 10, dtype=int)
-    bgrs = []
-    for i in idx:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
-        ok, b = cap.read()
-        if ok: bgrs.append(b)
-    cap.release()
-
-    # 2. SAM3 segment + save tmp
-    import tempfile; from pathlib import Path
-    tmp = Path(tempfile.mkdtemp())
-    paths = []
-    for j, b in enumerate(bgrs):
-        p = tmp / f"f{j:04d}.png"
-        cv2.imwrite(str(p), seg.segment_frame(b))
-        paths.append(p)
-
-    # 3. Pair-wise cycle + Cauchy fuse
-    h_pairs = []
-    for t in range(len(paths) - 1):
-        fwd = matcher.match(paths[t],   paths[t+1])
-        bwd = matcher.match(paths[t+1], paths[t])
-        sig = cycle.compute(fwd, bwd)
-        p_m = empirical_p_value(sig.mean, null_mean)
-        p_p = empirical_p_value(sig.peak, null_peak)
-        T = np.mean([np.tan(np.pi*(0.5 - p_m)), np.tan(np.pi*(0.5 - p_p))])
-        p_pair = 0.5 - np.arctan(T) / np.pi
-        h_pairs.append(1.0 - p_pair)
-
-    H_video = float(np.percentile(h_pairs, 80))
-    return H_video, H_video > threshold
-
-# ─── Usage ───
-# null = build_per_task_null(sorted(Path("reference/task_T").glob("*.png")))
-# H, is_hallu = score_video(Path("query.mp4"), *null)
-```
-
----
-
-## 6. Operational thresholds + per-task RATIO score
-
-### Option A: Global threshold
+### A. Global threshold (simple, không cần baseline per task)
 
 Threshold = quantile của H_peak trên real training videos đã evaluate.
 
-| Target FPR | Quantile | Threshold (GR1 example) | Gen catch |
+| FPR target | Quantile | GR1 example | Catch rate |
 |---|---|---|---|
-| 0% (max + ε) | max + ε | **0.832** | 16/24 (67%) |
+| 0% | max + ε | 0.832 | 16/24 (67%) |
 | 5% | p95 | 0.815 | 17/24 |
 | 10% | p90 | 0.770 | 19/24 |
 
-### Option B: Per-task RATIO (recommended) ⭐
+### B. Per-task ratio (recommended) ⭐
 
-Mỗi task có baseline riêng:
+Mỗi task lưu H_train. Test ratio = H_test / H_train.
 
 ```
-H_train_task = H_peak khi chấm video training của task đó
-ratio        = H_test / H_train_task
-
-verdict:
-  ratio > 1.0  → more anomalous than training → HALLU
-  ratio ~ 1.0  → boundary
-  ratio < 0.95 → clearly clean
+ratio > 1.0   → HALLU (anomalous hơn training)
+0.95-1.0      → borderline
+< 0.95        → clean
 ```
 
-**Lợi:** FPR = 0% by construction cho từng task. Tự calibrate khi thêm task mới.
-Interpretation rõ ràng: "X% anomalous hơn training video của cùng task".
+**Lợi:**
+- FPR = 0% by construction cho mỗi task
+- Continuous interpretation: "X% anomalous hơn training"
+- Cross-task fair: task có baseline cao không penalize unfairly
+- Auto-calibrate khi thêm task mới
 
-**Kết quả GR1:** 18/24 gen flagged (vs 16/24 global) — task 2 (rubik) catch tốt hơn vì baseline thấp (0.62) nên 0.72-0.81 vẫn ratio > 1.16.
-
-Continuous H_video score là output chính. Threshold/ratio là helper cho binary decision.
-
----
-
-## 7. Hyperparameters
-
-| Param | Mặc định | Khi nào chỉnh |
-|---|---|---|
-| Reference frames per task | 50 | Tăng → null dày hơn (chi phí: SAM3 + lưu trữ) |
-| Null lags | {1, 2, 5, 10} | Thêm lag-3, 7 nếu cần cover gap |
-| n_frames per query | 10 | Tăng nếu video > 8 sec |
-| Cert floor | 0.1 | Tăng → 0.2 nếu nhiều texture đối xứng |
-| Aggregator | p80 | Dùng p90 nếu video dài, p50 nếu cần robust |
-| Threshold | per-task max(real) + ε | Hoặc p95 cho FPR ≤ 5% |
+**GR1 result:** 18/24 hallu (vs 16/24 global).
 
 ---
 
-## 8. Cần biết task của query?
+## 7. Cấu trúc cache
 
-**CÓ** — đây là điểm khác cross-task pool.
+Thư mục portable, copy được:
 
-Mỗi query cần biết thuộc task nào để load đúng null. Một số cách:
-- **Pre-label:** user input task khi gọi API
-- **Auto-classify:** DINOv2 embedding của 1 frame query → nearest task centroid trong pool → assign task
-- **Multi-task scoring:** chấm query với null của all tasks → lấy min H (best match)
+```
+null_per_task/
+├── 1_Use_the_right_hand_to_pick_up_green_bok_choy.npz
+├── 2_Use_the_right_hand_to_pick_up_rubiks_cube.npz
+├── 3_Use_the_right_hand_to_pick_up_banana.npz
+├── 4_Use_the_left_hand_to_pick_up_dragonfruit.npz
+└── 6_Use_the_right_hand_to_pick_up_orange.npz
+```
 
-Method đơn giản: yêu cầu user truyền `task_id`. Best practice cho production.
+Mỗi file ~ 5-10 KB chứa `null_mean`, `null_peak`, `H_train`, metadata.
 
 ---
 
-## 9. Code path đầy đủ
+## 8. Code reference
 
 | File | Purpose |
 |---|---|
-| `warp_score/temporal_signals.py` | `CycleSignal` class (OOP, có cert-weighting) |
-| `warp_score/matcher.py` | `RoMaMatcher.match()` → fwd + bwd warp |
+| `warp_score/temporal_signals.py` | `CycleSignal` class (OOP, cert-weighting) |
+| `warp_score/matcher.py` | `RoMaMatcher` (warp + cert per pair) |
 | `warp_score/sam_segmenter.py` | `VideoFrameSegmenter` cho bg removal |
-| `scripts/eval_per_task_dense_null.py` | Full eval pipeline (run ngay) |
+| `scripts/eval_per_task_dense_null.py` | End-to-end pipeline (offline + online) |
+| `scripts/compute_per_task_ratio.py` | Per-task ratio score từ raw H |
 
-Run end-to-end:
+### Run end-to-end (5 tasks GR1)
 
 ```bash
 conda activate groot
+
+# Offline + Online cho 5 eval tasks
 python scripts/eval_per_task_dense_null.py
-# → paper-physical-gr1/per_task_dense_eval/per_task_dense_table.csv
+# → per_task_dense_eval/per_task_dense_table.csv
+
+# Compute per-task ratio ranking
+python scripts/compute_per_task_ratio.py
+# → per_task_dense_eval/per_task_ratio_table.csv
+# → per_task_dense_eval/per_task_ratio_ranking.md
 ```
 
 ---
 
-## 10. Tóm tắt khác biệt với cách cross-task cũ
+## 9. Hyperparameters
 
-| Aspect | Cross-task (cũ) | **Per-task multi-lag (mới)** |
+| Param | Default | Sensitivity |
 |---|---|---|
-| Null source | 92 tasks pool, 1472 pairs | **Per task**, 182 pairs each |
-| Lag | Lag-1 (or inference lag) | **Lags 1, 2, 5, 10** |
-| k-NN selection | DINOv2 top-K từ pool 4600 | Không cần (null is task-specific) |
-| Real false positives | 2-3 / 30 ở FPR=5% | **0 / 5 ở FPR=0%** |
-| Gen catch @ FPR=0% | 2-3 / 24 | **16 / 24** |
+| Reference frames per task | 50 | Tăng → null dày hơn, SAM3 cost tăng |
+| `NULL_LAGS` | `[1,2,3,4,5,6,8,10,15]` | More lags → smoother null, +linear compute |
+| `n_frames` per query | 10 | Tăng nếu video > 8 sec, RoMa cost tăng |
+| `cert_floor` | 0.1 | Tăng → 0.2 nếu texture đối xứng (rubik) |
+| Aggregator | `p80` (80th percentile) | `max` sensitive, `median` robust |
+| Threshold | per-task ratio = 1.0 | Hoặc global = 0.832 |
+
+---
+
+## 10. Limitations & failure modes
+
+1. **Yêu cầu task ID** cho query. Cross-task pool (cũ) không cần, nhưng accuracy thấp hơn.
+2. **1 training video / task** → H_train là point estimate, không có variance estimate. Nếu có 5+ real videos per task, có thể compute proper std và z-score.
+3. **Pure feature matching ceiling**: Cosmos sinh motion realistic → cycle drift ≈ real ở 1 số videos. Cần semantic signal (VLA action, 3D pose) để vượt ceiling này.
+4. **SAM3 noise**: nếu SAM3 segment sai → high noise vào cycle. Robust hơn khi cert_floor được tăng.
+5. **Video quá ngắn (< 2 sec)**: ít pairs → p80 unstable. Cần n_frames ≥ 5.
+
+---
+
+## 11. So sánh với cross-task pool method (cũ)
+
+| Aspect | Cross-task pool | **Per-task multi-lag (this)** |
+|---|---|---|
+| Null source | 92-task pool, 1472 pairs total | Per-task, ~410 pairs each |
+| Lags | Lag-1 only (or random) | **{1,2,3,4,5,6,8,10,15}** |
+| k-NN selection | DINOv2 top-K từ 4600 frames | Không cần (null is task-scoped) |
+| Real false positive | 2-3 / 30 ở FPR=5% | **0 / 5 by construction** |
+| Gen catch @ FPR=0% | 2-3 / 24 | **16-18 / 24** |
 | Task ID required | No | Yes |
-| Compute (calib) | ~25 min (1472 pairs) | ~25 min cho 5 tasks |
+| Compute (offline) | ~25 min total | ~10 min per task |
+| Interpretability | scalar H | scalar H + ratio so với training |
