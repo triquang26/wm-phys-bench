@@ -405,8 +405,9 @@ def main() -> None:
                     help="Dir of conditioning images keyed by task name. Repeat for multiple.")
     ap.add_argument("--ckpt_root", default=SCRIPT_DIR / "checkpoints", type=Path,
                     help="Dir holding nvidia/Cosmos-Predict2-* and google-t5/t5-11b.")
-    ap.add_argument("--profile", default="high", choices=["high", "gr00t"],
-                    help="Generation profile: 'high' (base 14B) or 'gr00t' (GR1 fine-tune)")
+    ap.add_argument("--profile", default="high", choices=["high", "gr00t", "droid"],
+                    help="Generation profile: 'high' (base 14B), 'gr00t' (GR1 fine-tune), "
+                         "or 'droid' (DROID fine-tune)")
     ap.add_argument("--seed_offset", type=int, default=None,
                     help="seed = seed_offset + task_idx * n_per_task + vid_idx (default: profile.base_seed)")
     ap.add_argument("--n_per_task", type=int, default=1,

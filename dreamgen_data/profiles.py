@@ -4,6 +4,8 @@ Supported profiles:
   "high"   -- base Cosmos-Predict2-14B-Video2World, seed_offset=2000
   "gr00t"  -- Cosmos-Predict2-14B-Sample-GR00T-Dreams-GR1 fine-tune,
                adds robot prompt prefix, same 480p/16fps config
+  "droid"  -- Cosmos-Predict2-14B-Sample-GR00T-Dreams-DROID fine-tune,
+               adds robot prompt prefix, same 480p/16fps config
 """
 from __future__ import annotations
 
@@ -58,6 +60,16 @@ GR00T = GenerationProfile(
     disable_prompt_refiner=True,
 )
 
+# DROID fine-tune: same prompt-refiner=OFF rationale as GR00T. Seed offset 4000
+# keeps DROID generations distinct from high (2000+) and gr00t (3000+).
+DROID = GenerationProfile(
+    name="droid",
+    gr00t_variant="droid",
+    prompt_prefix=_GR00T_PROMPT_PREFIX,
+    base_seed=4000,
+    disable_prompt_refiner=True,
+)
+
 
 def from_name(name: str) -> GenerationProfile:
     """Return a pre-defined GenerationProfile by name. Raises ValueError if unknown."""
@@ -65,4 +77,6 @@ def from_name(name: str) -> GenerationProfile:
         return HIGH
     if name == "gr00t":
         return GR00T
-    raise ValueError(f"Unknown profile '{name}'. Supported: 'high', 'gr00t'")
+    if name == "droid":
+        return DROID
+    raise ValueError(f"Unknown profile '{name}'. Supported: 'high', 'gr00t', 'droid'")

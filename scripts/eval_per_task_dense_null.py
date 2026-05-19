@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import tempfile
 import time
@@ -36,14 +37,9 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
 REPO_ROOT = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination")
-BENCH = REPO_ROOT / "paper-physical-gr1"
-REF_ROOT = BENCH / "reference"
-RAW_VIDEO_ROOT = BENCH / "raw_videos" / "gr1"
-GEN_ROOT = BENCH / "generated"
-OUT = BENCH / "per_task_dense_eval"
-DINO_CACHE_DIR = BENCH / "ref_cache"
 
-EVAL_TASKS = [
+# ── Hardcoded GR-1 fallback list (used iff --tasks_json not provided) ───────
+EVAL_TASKS_GR1 = [
     "1_Use the right hand to pick up green bok choy from tan table right side to bottom level of wire basket.",
     "2_Use the right hand to pick up rubik's cube from top level of the shelf to bottom level of the shelf.",
     "3_Use the right hand to pick up banana from teal plate to wooden table.",
@@ -54,6 +50,39 @@ EVAL_TASKS = [
 NULL_LAGS = [1, 2, 5, 10]
 N_TEST_FRAMES = 10
 KNN_K = 15
+
+
+def _load_tasks(tasks_json: Path | None) -> list[str]:
+    if tasks_json is None:
+        return list(EVAL_TASKS_GR1)
+    raw = json.loads(tasks_json.read_text())
+    if not isinstance(raw, dict):
+        raise ValueError(f"{tasks_json}: expected top-level dict of {{task_short: {{...}}}}")
+
+    def _sort_key(kv):
+        k = kv[0]
+        try:
+            return (0, int(k))
+        except ValueError:
+            return (1, k)
+
+    items = sorted(raw.items(), key=_sort_key)
+    tasks: list[str] = []
+    for short, meta in items:
+        if not isinstance(meta, dict) or "task_full" not in meta:
+            raise ValueError(f"{tasks_json}: entry {short!r} missing 'task_full'")
+        tasks.append(str(meta["task_full"]))
+    return tasks
+
+
+def _resolve_tasks_json(arg: str | None, bench: Path) -> Path | None:
+    if arg is None:
+        return None
+    candidates = [bench / arg, REPO_ROOT / arg, Path(arg)]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError(f"tasks_json not found in any of: {[str(c) for c in candidates]}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -93,11 +122,37 @@ def cauchy_combine(ps: list[float]) -> float:
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--bench", default="paper-physical-gr1",
+                    help="bench dir name under REPO_ROOT (default: paper-physical-gr1)")
+    ap.add_argument("--tasks_json", default=None,
+                    help="path to eval_tasks.json (override hardcoded EVAL_TASKS_GR1). "
+                         "Relative paths resolve under <REPO_ROOT>/<bench>/ first, "
+                         "then under REPO_ROOT, then as cwd-relative.")
+    ap.add_argument("--raw_video_subdir", default="raw_videos/gr1",
+                    help="subdir under <bench>/ holding training <task_short>.mp4 files "
+                         "(default: raw_videos/gr1)")
     ap.add_argument("--use_knn", action=argparse.BooleanOptionalAction, default=True,
                     help="Enable k-NN signal + Cauchy fusion (default True)")
     ap.add_argument("--out_suffix", default="",
                     help="Append suffix to CSV filename (e.g. '_cycle_only')")
     args = ap.parse_args()
+
+    BENCH = REPO_ROOT / args.bench
+    REF_ROOT = BENCH / "reference"
+    RAW_VIDEO_ROOT = BENCH / args.raw_video_subdir
+    GEN_ROOT = BENCH / "generated"
+    OUT = BENCH / "per_task_dense_eval"
+    DINO_CACHE_DIR = BENCH / "ref_cache"
+
+    tasks_json_path = _resolve_tasks_json(args.tasks_json, BENCH)
+    EVAL_TASKS = _load_tasks(tasks_json_path)
+
+    print(f"bench         : {BENCH}")
+    print(f"ref_root      : {REF_ROOT}")
+    print(f"raw_video_root: {RAW_VIDEO_ROOT}")
+    print(f"gen_root      : {GEN_ROOT}")
+    print(f"tasks_json    : {tasks_json_path}")
+    print(f"tasks         : {len(EVAL_TASKS)}")
 
     OUT.mkdir(parents=True, exist_ok=True)
 
