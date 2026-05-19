@@ -416,6 +416,8 @@ def main() -> None:
                     help="Comma-separated task names to generate (default: all prompts)")
     ap.add_argument("--num_steps", type=int, default=35,
                     help="Denoising steps (default 35 = full quality; 30 = ~15%% faster)")
+    ap.add_argument("--save_fps", type=int, default=None,
+                    help="Override fps used when writing the output mp4 (default: model fps, typically 10)")
     args = ap.parse_args()
 
     profile = from_name(args.profile)
@@ -441,6 +443,8 @@ def main() -> None:
         print(f"[generate] fallback conditioning frame: {fallback}")
 
     factory = PipelineFactory(args.ckpt_root)
+    if args.save_fps is not None:
+        factory._fps_for_save = args.save_fps
     BulkGenerator(factory, profile, args.save_dir, input_dirs, fallback).run(
         prompts, seed_offset=args.seed_offset, n_per_task=args.n_per_task,
         num_steps=args.num_steps,
