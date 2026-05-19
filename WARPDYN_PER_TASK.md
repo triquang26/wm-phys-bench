@@ -211,17 +211,38 @@ def score_video(mp4_path, null_mean, null_peak, threshold=0.832):
 
 ---
 
-## 6. Operational thresholds (FPR-controlled)
+## 6. Operational thresholds + per-task RATIO score
+
+### Option A: Global threshold
 
 Threshold = quantile của H_peak trên real training videos đã evaluate.
 
 | Target FPR | Quantile | Threshold (GR1 example) | Gen catch |
 |---|---|---|---|
-| 0% (max + ε) | max + ε | **0.832** | **16/24 (67%)** |
+| 0% (max + ε) | max + ε | **0.832** | 16/24 (67%) |
 | 5% | p95 | 0.815 | 17/24 |
 | 10% | p90 | 0.770 | 19/24 |
 
-Continuous H_video score là output chính. Threshold là helper cho binary decision.
+### Option B: Per-task RATIO (recommended) ⭐
+
+Mỗi task có baseline riêng:
+
+```
+H_train_task = H_peak khi chấm video training của task đó
+ratio        = H_test / H_train_task
+
+verdict:
+  ratio > 1.0  → more anomalous than training → HALLU
+  ratio ~ 1.0  → boundary
+  ratio < 0.95 → clearly clean
+```
+
+**Lợi:** FPR = 0% by construction cho từng task. Tự calibrate khi thêm task mới.
+Interpretation rõ ràng: "X% anomalous hơn training video của cùng task".
+
+**Kết quả GR1:** 18/24 gen flagged (vs 16/24 global) — task 2 (rubik) catch tốt hơn vì baseline thấp (0.62) nên 0.72-0.81 vẫn ratio > 1.16.
+
+Continuous H_video score là output chính. Threshold/ratio là helper cho binary decision.
 
 ---
 
