@@ -47,6 +47,8 @@ def main():
                     help="How many real training videos to sample (default 50)")
     ap.add_argument("--n_frames", type=int, default=10,
                     help="Frames per video — must match inference n_frames")
+    ap.add_argument("--trim_top_frac", type=float, default=0.0,
+                    help="Drop top-fraction outliers from null (e.g. 0.01 = top 1%)")
     args = ap.parse_args()
 
     # Discover real videos
@@ -132,6 +134,15 @@ def main():
     cycle_means = np.sort(np.asarray(cycle_means, dtype=np.float32))
     cycle_peaks = np.sort(np.asarray(cycle_peaks, dtype=np.float32))
     jaccard_dists = np.sort(np.asarray(jaccard_dists, dtype=np.float32))
+
+    # ── Optional outlier trim: drop top fraction (often scene cuts / motion blur)
+    if args.trim_top_frac > 0:
+        n_drop = int(len(cycle_means) * args.trim_top_frac)
+        if n_drop > 0:
+            cycle_means = cycle_means[:-n_drop]
+            cycle_peaks = cycle_peaks[:-n_drop]
+            jaccard_dists = jaccard_dists[:-n_drop]
+            print(f"\nTrimmed top {args.trim_top_frac*100:.1f}% outliers ({n_drop} pairs)")
 
     print(f"\n=== Inference-matched null distributions ===")
     print(f"n_pairs:        {len(cycle_means)}")
