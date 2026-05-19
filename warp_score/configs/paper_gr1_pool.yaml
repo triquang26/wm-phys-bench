@@ -1,0 +1,15 @@
+adaptive_ref_selector: true
+artifacts_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/paper-physical-gr1/pool/results
+bidirectional: true
+dino_model: dinov2_vits14
+fuser: cauchy
+k_per_frame: 50
+n_min_refs: 10
+per_pixel_calibration: true
+query_high_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/paper-physical-gr1/pool/query_high
+query_low_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/paper-physical-gr1/pool/query_low
+reference_dir: /mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination/paper-physical-gr1/pool/reference
+signal_names:
+- ivar_maha
+- peak_maha
+use_precision: true
