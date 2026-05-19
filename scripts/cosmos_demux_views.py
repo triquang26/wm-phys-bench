@@ -31,51 +31,61 @@ import numpy as np
 
 REPO_ROOT = Path("/mnt/data/sftp/data/quangpt3/gcvwm/calibration/feepe/feature_matching_eval_hallucination")
 
-# Tile coordinates inside the 640×384 composite (y0:y1, x0:x1)
-TILE_COORDS = {
-    "exterior_1": ((0,   192), (0,   320)),
-    "exterior_2": ((0,   192), (320, 640)),
-    "wrist":      ((192, 384), (0,   320)),
+# Layout of the 2×2 composite — view ↔ quadrant. Tile pixel coords are derived
+# at runtime from the actual frame dimensions (Cosmos emits 768×432 at 16:9
+# for DROID; conditioning input is 640×384). Bottom-right is filler.
+VIEW_QUADRANTS = {
+    "exterior_1": ("top",    "left"),
+    "exterior_2": ("top",    "right"),
+    "wrist":      ("bottom", "left"),
 }
-EXPECTED_W = 640
-EXPECTED_H = 384
+
+
+def _tile_coords(width: int, height: int) -> dict[str, tuple[tuple[int, int], tuple[int, int]]]:
+    """Compute (y0:y1, x0:x1) for each view tile from frame W×H."""
+    hw, hh = width // 2, height // 2
+    bounds = {
+        ("top",    "left"):  ((0,  hh),     (0,  hw)),
+        ("top",    "right"): ((0,  hh),     (hw, width)),
+        ("bottom", "left"):  ((hh, height), (0,  hw)),
+        ("bottom", "right"): ((hh, height), (hw, width)),
+    }
+    return {v: bounds[q] for v, q in VIEW_QUADRANTS.items()}
 
 
 def demux_one(src_mp4: Path, dst_dir: Path, force: bool = False) -> dict[str, Path]:
     """Demux a single composite mp4 into the three view mp4s. Returns mapping."""
     dst_dir.mkdir(parents=True, exist_ok=True)
 
-    out_paths = {v: dst_dir / f"{v}.mp4" for v in TILE_COORDS}
+    out_paths = {v: dst_dir / f"{v}.mp4" for v in VIEW_QUADRANTS}
     if not force and all(p.exists() for p in out_paths.values()):
         return out_paths
 
     cap = cv2.VideoCapture(str(src_mp4))
     if not cap.isOpened():
         raise RuntimeError(f"could not open {src_mp4}")
-    fps = cap.get(cv2.CAP_PROP_FPS) or 5.0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 16.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    if (width, height) != (EXPECTED_W, EXPECTED_H):
-        print(f"  [warn] {src_mp4.name}: expected {EXPECTED_W}×{EXPECTED_H}, "
-              f"got {width}×{height} — resizing before demux")
+    if width % 2 or height % 2:
+        raise RuntimeError(f"{src_mp4.name}: expected even W,H got {width}×{height}")
+
+    tile_coords = _tile_coords(width, height)
+    tile_w, tile_h = width // 2, height // 2
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writers = {
-        v: cv2.VideoWriter(str(out_paths[v]), fourcc, fps, (320, 192))
-        for v in TILE_COORDS
+        v: cv2.VideoWriter(str(out_paths[v]), fourcc, fps, (tile_w, tile_h))
+        for v in VIEW_QUADRANTS
     }
 
-    n_frames = 0
     while True:
         ok, bgr = cap.read()
         if not ok:
             break
-        if (bgr.shape[1], bgr.shape[0]) != (EXPECTED_W, EXPECTED_H):
-            bgr = cv2.resize(bgr, (EXPECTED_W, EXPECTED_H), interpolation=cv2.INTER_AREA)
-        for view, ((y0, y1), (x0, x1)) in TILE_COORDS.items():
+        for view, ((y0, y1), (x0, x1)) in tile_coords.items():
             tile = bgr[y0:y1, x0:x1]
             writers[view].write(tile)
-        n_frames += 1
     cap.release()
     for w in writers.values():
         w.release()
@@ -119,7 +129,7 @@ def main() -> None:
         print(f"[task {task_dir.name}] {len(mp4s)} composite mp4(s)")
         for src in mp4s:
             dst_dir = task_dir / f"{src.stem}_views"
-            already = all((dst_dir / f"{v}.mp4").exists() for v in TILE_COORDS)
+            already = all((dst_dir / f"{v}.mp4").exists() for v in VIEW_QUADRANTS)
             if already and not args.force:
                 total_skipped += 1
                 print(f"  [skip] {src.name} (already demuxed)")
