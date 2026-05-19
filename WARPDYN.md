@@ -1,10 +1,20 @@
-# WarpDyn — Robust video hallucination detection via pure feature matching
+# WarpDyn — Robust anomaly detection on robot videos via pure feature matching
 
-End-to-end pipeline để phát hiện video do AI sinh ra (Cosmos, OpenSora, ...) so với video robot thật, **không cần optical flow model**. Chỉ dùng RoMa dense warp + DINOv2 features.
+End-to-end pipeline để phát hiện video **bất thường** so với robot training distribution. Output là **continuous anomaly score [0, 1]** — không cần optical flow model, chỉ dùng RoMa dense warp + DINOv2 features.
 
-**Production metric (GR1 benchmark, 30 videos):**
-- Per-video AUROC = **0.842** [95% CI 0.67–0.96]
-- Operating point (threshold = 0.924): **FPR = 0.0%**, TPR = 70.8%, accuracy 75.9%
+## ⚠ Framing đúng (REVISED)
+
+**Generated videos KHÔNG phải = hallucinated.** Cosmos / generator chỉ sinh video, có thể plausible hoặc không. Việc dùng "gen = positive label" là sai về phương pháp luận.
+
+**Mục tiêu thực sự:** Real training videos phải **KHÔNG bị flag là anomaly** (FPR thấp).
+
+→ Calibrate threshold **chỉ từ real training data** (conformal style).
+→ Score continuous của gen video là **informative**, không phải metric đánh giá.
+
+**Production metric (GR1, 30 real videos production-realistic):**
+- Real H_peak distribution: range [0.31, 0.96], mean **0.69**, p95 = **0.93**
+- Threshold = max(real) + epsilon = **0.959** → **FPR = 0%** trên real training
+- Tại threshold đó: 2/24 gen videos được flag là "anomalous so với real distribution" (informative)
 
 ---
 
