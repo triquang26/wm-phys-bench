@@ -1,22 +1,25 @@
 """WarpDyn temporal signals — pure feature-matching intra-video anomaly.
 
-Two signals computed from RoMa dense warp fields (no optical-flow model):
+Class hierarchy:
 
-  S2  cycle_error:    fwd-bwd composition drift between consecutive frames.
-                      Real video pairs ≈ identity composition; generated
-                      frame pairs accumulate drift due to diffusion artifacts.
+    TemporalSignal (abstract)
+    ├── CycleSignal              — fwd/bwd warp composition drift (S2)
+    ├── PrecisionAnomalySignal   — cycle drift × RoMa precision (S2-PA, motion-robust)
+    └── TrajectoryAccelSignal    — multi-lag grid acceleration (S3, currently weak)
 
-  S3  traj_accel:     multi-lag grid-point acceleration. Track a uniform
-                      grid through W(f_t -> f_{t+1}) and W(f_{t+1} -> f_{t+2});
-                      real motion is smooth (low accel), generated motion
-                      shows stationary stutter or jerk.
+All operate on `MatchResult` objects (warp + cert + precision) so signals
+can use the FULL match output, not just the scalar cert. PrecisionAnomalySignal
+uses RoMa's precision matrix determinant — high precision regions count
+more, which discriminates "real high-motion drift" (low precision in
+moving region) from "generator artifacts" (high precision but inconsistent).
 
-Both signals return scalar per query frame + per-pixel heatmaps for viz.
 Calibration null distributions are fit from REAL training-video pairs.
 """
 from __future__ import annotations
 
-from typing import Optional
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -28,9 +31,6 @@ import numpy as np
 # RoMa returns warp_AB of shape (H, W, 2) in normalized grid_sample coords:
 #   warp[y, x] = (u, v) where u, v ∈ [-1, 1] are the normalized coords
 #   in image B that pixel (x, y) of image A maps to.
-#
-# Helpers below convert between normalized and pixel-coord systems and
-# bilinear-sample warp fields.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -53,150 +53,230 @@ def _sample_warp_at(warp_field: np.ndarray, pts_xy: np.ndarray) -> np.ndarray:
     return np.stack([sx, sy], axis=-1)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# S2: forward-backward cycle composition error
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def cycle_error_map(
-    warp_fwd: np.ndarray,
-    warp_bwd: np.ndarray,
-) -> np.ndarray:
-    """Per-pixel cycle drift between forward and backward warps.
-
-    Args:
-        warp_fwd: (H, W, 2) RoMa-normalized warp A → B.
-        warp_bwd: (H, W, 2) RoMa-normalized warp B → A.
-
-    Returns:
-        err_map: (H, W) cycle drift in pixel units (||p − bwd(fwd(p))||).
-    """
+def cycle_error_map(warp_fwd: np.ndarray, warp_bwd: np.ndarray) -> np.ndarray:
+    """Per-pixel cycle drift between forward and backward warps (pixel units)."""
     H, W = warp_fwd.shape[:2]
-
-    fwd_px = _norm_to_pixel(warp_fwd)            # (H, W, 2) coords in B
-    bwd_at_fwd = _sample_warp_at(warp_bwd, fwd_px)  # (H, W, 2) still normalized
-    back_px = _norm_to_pixel(bwd_at_fwd)         # (H, W, 2) coords in A
-
+    fwd_px = _norm_to_pixel(warp_fwd)
+    bwd_at_fwd = _sample_warp_at(warp_bwd, fwd_px)
+    back_px = _norm_to_pixel(bwd_at_fwd)
     yy, xx = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
     orig_px = np.stack([xx, yy], axis=-1).astype(np.float32)
-
-    err = np.linalg.norm(back_px - orig_px, axis=-1).astype(np.float32)
-    return err
+    return np.linalg.norm(back_px - orig_px, axis=-1).astype(np.float32)
 
 
-def cycle_signal(
-    warp_fwd: np.ndarray,
-    warp_bwd: np.ndarray,
-    cert_fwd: Optional[np.ndarray] = None,
-    interior_mask: Optional[np.ndarray] = None,
-    cert_floor: float = 0.1,
-) -> dict:
-    """Cycle composition signal — cert-weighted mean and peak drift.
+def precision_det(precision: np.ndarray) -> np.ndarray:
+    """det of (H, W, 2, 2) precision matrix → (H, W) confidence per pixel.
 
-    Both `mean` and `peak` are computed only on pixels whose RoMa certainty
-    exceeds `cert_floor` (default 0.1). On uniform-texture regions (e.g.
-    rubik's-cube faces) RoMa returns near-zero cert and the warp field is
-    noise — including these pixels poisons the peak signal. Filtering them
-    out is what makes the detector robust on textured/symmetric scenes.
-
-    Returns dict with:
-        mean      cert-weighted interior mean drift (high-cert pixels only)
-        peak      99th percentile drift over high-cert pixels
-        err_map   (H, W) per-pixel drift map (for heatmap viz)
+    Higher = RoMa is more confident in the warp at this pixel.
+    sqrt(det) keeps it in linear scale with cert (which is sqrt(det)/max).
     """
-    err_map = cycle_error_map(warp_fwd, warp_bwd)
-    H, W = err_map.shape
+    p = precision
+    det = p[..., 0, 0] * p[..., 1, 1] - p[..., 0, 1] * p[..., 1, 0]
+    return np.clip(det, 0, None).astype(np.float32)
 
-    if interior_mask is None:
-        interior_mask = np.ones((H, W), dtype=bool)
 
-    if cert_fwd is None:
-        cert_fwd = np.ones((H, W), dtype=np.float32)
-    cert = cert_fwd.astype(np.float32)
-    valid = interior_mask & (cert > cert_floor)
+# ─────────────────────────────────────────────────────────────────────────────
+# Signal result + abstract base
+# ─────────────────────────────────────────────────────────────────────────────
 
-    if not valid.any():
-        # Fall back to interior-only if cert mask is empty
-        valid = interior_mask
+
+@dataclass
+class SignalResult:
+    """Per-pair temporal-signal output."""
+    name:           str
+    mean:           float
+    peak:           float
+    pixel_map:      Optional[np.ndarray] = None   # (H, W) per-pixel score (heatmap)
+    metadata:       dict[str, Any] = field(default_factory=dict)
+
+
+class TemporalSignal(ABC):
+    """Abstract base — compute a scalar+pixel-map score from a frame pair."""
+
+    name: str = "abstract"
+
+    def __init__(self, cert_floor: float = 0.1, peak_percentile: float = 99.0):
+        self.cert_floor = cert_floor
+        self.peak_percentile = peak_percentile
+
+    @abstractmethod
+    def _per_pixel_score(self,
+                         match_fwd,                 # MatchResult
+                         match_bwd,                 # MatchResult
+                         ) -> np.ndarray:
+        """Compute per-pixel signal map (H, W). Subclasses override."""
+        ...
+
+    def _validity_mask(self,
+                       match_fwd,
+                       interior_mask: Optional[np.ndarray],
+                       ) -> np.ndarray:
+        cert = match_fwd.cert.astype(np.float32)
+        H, W = cert.shape
+        interior = (interior_mask if interior_mask is not None
+                    else np.ones((H, W), dtype=bool))
+        return interior & (cert > self.cert_floor)
+
+    def _aggregate(self,
+                   score_map: np.ndarray,
+                   weights:   np.ndarray,
+                   valid:     np.ndarray,
+                   ) -> tuple[float, float]:
+        """Cert-weighted mean and high-percentile peak over valid pixels."""
         if not valid.any():
-            return {"mean": 0.0, "peak": 0.0, "err_map": err_map}
+            return 0.0, 0.0
+        w_sum = float(weights[valid].sum())
+        if w_sum < 1e-6:
+            mean_val = float(score_map[valid].mean())
+        else:
+            mean_val = float((score_map[valid] * weights[valid]).sum() / w_sum)
+        vals = score_map[valid]
+        if vals.size < 100:
+            peak_val = float(vals.max())
+        else:
+            peak_val = float(np.percentile(vals, self.peak_percentile))
+        return mean_val, peak_val
 
-    weights = cert * valid.astype(np.float32)
-    w_sum = weights.sum()
-    if w_sum < 1e-6:
-        mean_val = float(err_map[valid].mean())
-    else:
-        mean_val = float((err_map * weights).sum() / w_sum)
-
-    # Cert-weighted percentile: sort high-cert pixels, take 99th percentile.
-    vals = err_map[valid]
-    if vals.size == 0:
-        peak_val = 0.0
-    elif vals.size < 100:
-        peak_val = float(vals.max())  # too few samples for meaningful percentile
-    else:
-        peak_val = float(np.percentile(vals, 99.0))
-
-    return {"mean": mean_val, "peak": peak_val, "err_map": err_map}
+    def compute(self,
+                match_fwd,                          # MatchResult (warp, cert, precision)
+                match_bwd,                          # MatchResult
+                interior_mask: Optional[np.ndarray] = None,
+                ) -> SignalResult:
+        score_map = self._per_pixel_score(match_fwd, match_bwd)
+        valid = self._validity_mask(match_fwd, interior_mask)
+        weights = match_fwd.cert.astype(np.float32) * valid.astype(np.float32)
+        mean_val, peak_val = self._aggregate(score_map, weights, valid)
+        return SignalResult(
+            name=self.name,
+            mean=mean_val,
+            peak=peak_val,
+            pixel_map=score_map,
+            metadata={"cert_floor": self.cert_floor, "peak_q": self.peak_percentile},
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# S3: multi-lag trajectory acceleration
+# CycleSignal — original S2
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def trajectory_accel(
-    warp_01: np.ndarray,
-    warp_12: np.ndarray,
-    grid_size: int = 16,
-) -> dict:
-    """Grid-point trajectory acceleration across 3 consecutive frames.
+class CycleSignal(TemporalSignal):
+    """Forward-backward warp composition drift (cert-weighted)."""
+    name = "cycle"
 
-    Track a `grid_size × grid_size` uniform lattice from frame f_0 forward:
-        p_0 → p_1 via warp_01     (warp_01 = RoMa(f_0 → f_1))
-        p_1 → p_2 via warp_12     (warp_12 = RoMa(f_1 → f_2))
-    Then acceleration = ||p_2 - 2 p_1 + p_0|| (discrete second derivative).
-    Real motion is smooth → small accel; generated stutter/jerk → large accel.
+    def _per_pixel_score(self, match_fwd, match_bwd) -> np.ndarray:
+        return cycle_error_map(match_fwd.warp, match_bwd.warp)
 
-    Returns dict with:
-        mean      mean trajectory acceleration over the grid
-        peak      max grid-point acceleration
-        accel_map (grid_size, grid_size) per-point acceleration
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PrecisionAnomalySignal — NEW S2-PA
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class PrecisionAnomalySignal(TemporalSignal):
+    """Cycle drift weighted by RoMa precision determinant — motion-robust.
+
+    Motivation:
+        Real videos with fast motion produce LARGE cycle drift in moving
+        regions, but RoMa is also UNCERTAIN in those regions (low precision).
+        Generated-video artifacts (texture flicker, ghosting) produce HIGH
+        cycle drift WHILE RoMa stays falsely confident (mid-to-high precision).
+        Per-pixel score = cycle × sqrt(precision_det) suppresses real motion
+        (low precision compensates) and amplifies generator artifacts.
+
+    Per-pixel score:
+        s(x,y) = cycle_drift(x,y) × sqrt(det(precision_fwd(x,y))) / norm_factor
+
+    where norm_factor is the 99th-percentile of sqrt(det) on the SAME frame
+    (so the signal is scale-invariant to overall RoMa confidence level).
     """
-    H, W = warp_01.shape[:2]
-    ys = np.linspace(0, H - 1, grid_size).astype(np.float32)
-    xs = np.linspace(0, W - 1, grid_size).astype(np.float32)
-    yy, xx = np.meshgrid(ys, xs, indexing="ij")
-    p0 = np.stack([xx, yy], axis=-1).astype(np.float32)   # (G, G, 2)
+    name = "precision_anomaly"
 
-    # p_1 = where p_0 ends up in f_1 (via warp_01)
-    warp_01_px_field = _norm_to_pixel(warp_01)             # (H, W, 2)
-    p1 = _sample_warp_at(warp_01_px_field, p0)             # (G, G, 2)
-
-    # p_2 = where p_1 ends up in f_2 (via warp_12, sampled at p_1)
-    warp_12_px_field = _norm_to_pixel(warp_12)
-    p2 = _sample_warp_at(warp_12_px_field, p1)             # (G, G, 2)
-
-    accel_vec = p2 - 2.0 * p1 + p0
-    accel_map = np.linalg.norm(accel_vec, axis=-1).astype(np.float32)  # (G, G)
-
-    return {
-        "mean": float(accel_map.mean()),
-        "peak": float(accel_map.max()),
-        "accel_map": accel_map,
-    }
+    def _per_pixel_score(self, match_fwd, match_bwd) -> np.ndarray:
+        cycle = cycle_error_map(match_fwd.warp, match_bwd.warp)
+        if match_fwd.precision is None:
+            # Fallback: use cert directly if precision unavailable
+            conf = match_fwd.cert.astype(np.float32)
+        else:
+            det = precision_det(match_fwd.precision)
+            conf = np.sqrt(det).astype(np.float32)
+            # Self-normalize so the signal doesn't depend on absolute precision scale
+            ref = float(np.percentile(conf, 99.0))
+            if ref > 1e-8:
+                conf = np.clip(conf / ref, 0, 1)
+        return cycle * conf
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Empirical p-value (shared with appearance signal logic)
+# Trajectory acceleration — original S3 (kept for completeness)
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+class TrajectoryAccelSignal:
+    """Multi-lag grid acceleration. Standalone — not a TemporalSignal subclass
+    because it needs THREE consecutive warps, not a pair."""
+    name = "trajectory_accel"
+
+    def __init__(self, grid_size: int = 16):
+        self.grid_size = grid_size
+
+    def compute(self, warp_01: np.ndarray, warp_12: np.ndarray) -> SignalResult:
+        H, W = warp_01.shape[:2]
+        ys = np.linspace(0, H - 1, self.grid_size).astype(np.float32)
+        xs = np.linspace(0, W - 1, self.grid_size).astype(np.float32)
+        yy, xx = np.meshgrid(ys, xs, indexing="ij")
+        p0 = np.stack([xx, yy], axis=-1).astype(np.float32)
+        warp_01_px = _norm_to_pixel(warp_01)
+        warp_12_px = _norm_to_pixel(warp_12)
+        p1 = _sample_warp_at(warp_01_px, p0)
+        p2 = _sample_warp_at(warp_12_px, p1)
+        accel_vec = p2 - 2.0 * p1 + p0
+        accel_map = np.linalg.norm(accel_vec, axis=-1).astype(np.float32)
+        return SignalResult(
+            name=self.name,
+            mean=float(accel_map.mean()),
+            peak=float(accel_map.max()),
+            pixel_map=accel_map,
+            metadata={"grid_size": self.grid_size},
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backwards-compatible function wrappers (so old scripts keep working)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def cycle_signal(warp_fwd: np.ndarray,
+                 warp_bwd: np.ndarray,
+                 cert_fwd: Optional[np.ndarray] = None,
+                 interior_mask: Optional[np.ndarray] = None,
+                 cert_floor: float = 0.1,
+                 ) -> dict:
+    """Legacy function — wraps CycleSignal class. Returns dict for old callers."""
+
+    class _FakeMatch:
+        def __init__(self, warp, cert):
+            self.warp = warp
+            self.cert = cert if cert is not None else np.ones(warp.shape[:2], dtype=np.float32)
+            self.precision = None
+
+    fwd = _FakeMatch(warp_fwd, cert_fwd)
+    bwd = _FakeMatch(warp_bwd, None)
+    sig = CycleSignal(cert_floor=cert_floor).compute(fwd, bwd, interior_mask)
+    return {"mean": sig.mean, "peak": sig.peak, "err_map": sig.pixel_map}
+
+
+def trajectory_accel(warp_01: np.ndarray,
+                     warp_12: np.ndarray,
+                     grid_size: int = 16,
+                     ) -> dict:
+    """Legacy function — wraps TrajectoryAccelSignal class."""
+    sig = TrajectoryAccelSignal(grid_size=grid_size).compute(warp_01, warp_12)
+    return {"mean": sig.mean, "peak": sig.peak, "accel_map": sig.pixel_map}
 
 
 def empirical_p_value(value: float, sorted_null: np.ndarray) -> float:
-    """Right-tail empirical p-value: P(null ≥ value).
-
-    Smoothed so p ∈ (0, 1) strictly (avoids Cauchy ±∞ blow-up).
-    """
+    """Right-tail empirical p-value: P(null ≥ value), smoothed."""
     n = sorted_null.size
     if n == 0:
         return 0.5
