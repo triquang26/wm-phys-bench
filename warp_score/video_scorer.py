@@ -167,7 +167,14 @@ class VideoScorer:
 
     @classmethod
     def from_cache(cls, cache_dir: Path | str, **kwargs) -> "VideoScorer":
-        return cls(cache=ReferenceCache.load(Path(cache_dir)), **kwargs)
+        cache_dir = Path(cache_dir)
+        # Auto-load calibrated threshold + aggregator if available
+        thr_path = cache_dir / "threshold.json"
+        if thr_path.exists() and "threshold" not in kwargs:
+            import json as _json
+            cfg = _json.loads(thr_path.read_text())
+            kwargs["threshold"] = cfg["threshold"]
+        return cls(cache=ReferenceCache.load(cache_dir), **kwargs)
 
     # ─────────────────────────────────────────────────────────────────────
 
@@ -343,8 +350,9 @@ class VideoScorer:
         h_values = np.array([f.h_score for f in per_frame_results], dtype=np.float32)
         video_h_robust = trimmed_mean(h_values, trim=0.1)
         video_h_peak = float(np.percentile(h_values, 80))
-        # Final decision: use robust mean
-        is_hallu = video_h_robust > self.threshold
+        # Final decision: 80th-percentile peak is the calibrated aggregator
+        # (matches paper-physical-gr1/ref_cache/threshold.json)
+        is_hallu = video_h_peak > self.threshold
 
         return VideoResult(
             video_path=str(video_path),
