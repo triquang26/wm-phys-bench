@@ -89,13 +89,20 @@ def cycle_signal(
     warp_bwd: np.ndarray,
     cert_fwd: Optional[np.ndarray] = None,
     interior_mask: Optional[np.ndarray] = None,
+    cert_floor: float = 0.1,
 ) -> dict:
-    """Cycle composition signal — mean and peak drift, cert-weighted.
+    """Cycle composition signal — cert-weighted mean and peak drift.
+
+    Both `mean` and `peak` are computed only on pixels whose RoMa certainty
+    exceeds `cert_floor` (default 0.1). On uniform-texture regions (e.g.
+    rubik's-cube faces) RoMa returns near-zero cert and the warp field is
+    noise — including these pixels poisons the peak signal. Filtering them
+    out is what makes the detector robust on textured/symmetric scenes.
 
     Returns dict with:
-        mean      cert-weighted interior mean cycle drift
-        peak      99th percentile drift (for tail anomaly)
-        err_map   (H, W) per-pixel drift (for heatmap viz)
+        mean      cert-weighted interior mean drift (high-cert pixels only)
+        peak      99th percentile drift over high-cert pixels
+        err_map   (H, W) per-pixel drift map (for heatmap viz)
     """
     err_map = cycle_error_map(warp_fwd, warp_bwd)
     H, W = err_map.shape
@@ -103,16 +110,32 @@ def cycle_signal(
     if interior_mask is None:
         interior_mask = np.ones((H, W), dtype=bool)
 
-    weights = cert_fwd if cert_fwd is not None else np.ones((H, W), dtype=np.float32)
-    weights = weights.astype(np.float32) * interior_mask.astype(np.float32)
+    if cert_fwd is None:
+        cert_fwd = np.ones((H, W), dtype=np.float32)
+    cert = cert_fwd.astype(np.float32)
+    valid = interior_mask & (cert > cert_floor)
+
+    if not valid.any():
+        # Fall back to interior-only if cert mask is empty
+        valid = interior_mask
+        if not valid.any():
+            return {"mean": 0.0, "peak": 0.0, "err_map": err_map}
+
+    weights = cert * valid.astype(np.float32)
     w_sum = weights.sum()
     if w_sum < 1e-6:
-        mean_val = float(err_map[interior_mask].mean()) if interior_mask.any() else 0.0
+        mean_val = float(err_map[valid].mean())
     else:
         mean_val = float((err_map * weights).sum() / w_sum)
 
-    vals = err_map[interior_mask]
-    peak_val = float(np.percentile(vals, 99.0)) if vals.size > 0 else 0.0
+    # Cert-weighted percentile: sort high-cert pixels, take 99th percentile.
+    vals = err_map[valid]
+    if vals.size == 0:
+        peak_val = 0.0
+    elif vals.size < 100:
+        peak_val = float(vals.max())  # too few samples for meaningful percentile
+    else:
+        peak_val = float(np.percentile(vals, 99.0))
 
     return {"mean": mean_val, "peak": peak_val, "err_map": err_map}
 
