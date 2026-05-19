@@ -101,38 +101,63 @@ def overlay_heatmap_on_frame(frame_bgr: np.ndarray,
                               heatmap: np.ndarray,
                               cert: Optional[np.ndarray] = None,
                               cert_floor: float = 0.1,
-                              alpha: float = 0.6,
-                              vmin: float = 0.0,
-                              vmax: float = 30.0,
+                              alpha: float = 0.85,
+                              percentile_clip: float = 95.0,
+                              annotate_top_cluster: bool = True,
                               ) -> np.ndarray:
-    """Overlay heatmap (cycle drift) on frame, MASKED by RoMa cert.
+    """Overlay heatmap on frame with VIVID TURBO colormap + cluster annotation.
 
-    Background / uniform-texture pixels (cert < cert_floor) → heatmap
-    suppressed to 0 so the visualization matches the actual signal
-    aggregation. Without this masking the background looks "bright"
-    because RoMa's warp on textureless regions is arbitrary and the
-    cycle composition there is noisy — but those pixels are NOT used
-    in the score computation.
+    Pipeline:
+      1. Mask heatmap by cert > cert_floor (drop background noise).
+      2. Adaptive vmax = 95th percentile of valid drift values
+         (so colors always use full spectrum, never washed out).
+      3. TURBO colormap (perceptually uniform, blue→green→yellow→red,
+         strongly vivid — best for spotting anomaly regions).
+      4. High alpha (0.85) where drift > 0 → bold red/orange clearly
+         marks hallu regions.
+      5. Optionally box the largest cluster of high-drift pixels.
     """
     H, W = heatmap.shape
-    h_clipped = np.clip(heatmap, vmin, vmax)
-    h_norm = (h_clipped - vmin) / max(vmax - vmin, 1e-6)
+    frame_r = cv2.resize(frame_bgr, (W, H), interpolation=cv2.INTER_LINEAR)
 
     if cert is not None:
-        # Sample cert to heatmap resolution, then zero out low-cert pixels
         cert_r = cv2.resize(cert.astype(np.float32), (W, H),
                             interpolation=cv2.INTER_LINEAR)
-        mask = (cert_r > cert_floor).astype(np.float32)
-        h_norm = h_norm * mask
-
-    frame_r = cv2.resize(frame_bgr, (W, H), interpolation=cv2.INTER_LINEAR)
-    colored = cv2.applyColorMap((h_norm * 255).astype(np.uint8), cv2.COLORMAP_HOT)
-    # Only blend where mask is non-zero (so frame shows through on bg)
-    if cert is not None:
-        alpha_map = (h_norm > 0.001)[..., None].astype(np.float32) * alpha
-        overlay = (frame_r * (1 - alpha_map) + colored * alpha_map).astype(np.uint8)
+        mask = (cert_r > cert_floor)
     else:
-        overlay = cv2.addWeighted(frame_r, 1.0 - alpha, colored, alpha, 0)
+        mask = np.ones_like(heatmap, dtype=bool)
+
+    masked = np.where(mask, heatmap, 0.0).astype(np.float32)
+    if mask.any():
+        vmax = float(np.percentile(heatmap[mask], percentile_clip))
+        vmax = max(vmax, 5.0)
+    else:
+        vmax = 30.0
+    h_norm = np.clip(masked / max(vmax, 1e-6), 0, 1)
+
+    # TURBO colormap: vivid, perceptually uniform
+    colored = cv2.applyColorMap((h_norm * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
+
+    # Per-pixel alpha: high where drift exists, 0 elsewhere
+    alpha_map = (h_norm > 0.05)[..., None].astype(np.float32) * alpha
+    overlay = (frame_r * (1 - alpha_map) + colored * alpha_map).astype(np.uint8)
+
+    # Annotate top cluster of high-drift pixels (top 5% region)
+    if annotate_top_cluster and mask.any():
+        high_thresh = float(np.percentile(heatmap[mask], 95))
+        if high_thresh > 1.0:
+            high_mask = ((heatmap > high_thresh) & mask).astype(np.uint8) * 255
+            # Find largest connected component
+            num, labels, stats, _ = cv2.connectedComponentsWithStats(high_mask, connectivity=8)
+            if num > 1:
+                # Skip background (label 0), find biggest blob
+                biggest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+                x, y, w, h, area = stats[biggest]
+                if area > 10:    # only annotate non-trivial clusters
+                    cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 255, 255), 2)
+                    cv2.putText(overlay, "HALLU", (x, max(y - 5, 10)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1,
+                                cv2.LINE_AA)
     return overlay
 
 
@@ -168,31 +193,34 @@ def make_per_video_card(video_label: str,
         ax.set_title(f"f{i}", fontsize=8)
         ax.axis("off")
 
-    # Row 2: cycle heatmaps (between f_t and f_{t+1})
+    # Row 2: cycle heatmaps OVERLAID on frames with HALLU annotation
     for t, pd in enumerate(pair_data):
         ax = fig.add_subplot(gs[1, t])
-        overlay = overlay_heatmap_on_frame(seg_bgrs[t], pd["drift_map"],
-                                            cert=pd["cert_fwd"], cert_floor=0.1,
-                                            alpha=0.6)
+        overlay = overlay_heatmap_on_frame(
+            seg_bgrs[t], pd["drift_map"],
+            cert=pd["cert_fwd"], cert_floor=0.1,
+            alpha=0.85, percentile_clip=95.0, annotate_top_cluster=True,
+        )
         ax.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
-        ax.set_title(f"f{t}→{t+1}", fontsize=8)
+        ax.set_title(f"pair {t}→{t+1}  peak={pd['peak']:.1f}px",
+                     fontsize=7, fontweight="bold")
         ax.axis("off")
-    # Spare cell
     if n_pairs < n_frames:
         ax = fig.add_subplot(gs[1, -1])
         ax.text(0.5, 0.5, "—", ha="center", va="center", fontsize=20, color="gray")
         ax.axis("off")
 
-    # Row 3: per-pair cycle peak values (raw cycle drift peak — informative)
+    # Row 3: heatmap-only (no frame underneath) — pure pattern view
     for t, pd in enumerate(pair_data):
         ax = fig.add_subplot(gs[2, t])
-        peaks = pd["drift_map"][pd["cert_fwd"] > 0.1]
-        ax.hist(peaks.flatten()[:5000], bins=30, color="steelblue")
-        ax.axvline(np.percentile(peaks, 99) if peaks.size > 0 else 0,
-                   color="red", linewidth=1.0, linestyle="--")
-        ax.set_title(f"pair {t}\npeak={pd['peak']:.2f}", fontsize=7)
-        ax.set_yticks([])
-        ax.tick_params(axis="x", labelsize=6)
+        H, W = pd["drift_map"].shape
+        cert_r = cv2.resize(pd["cert_fwd"].astype(np.float32), (W, H))
+        mask = cert_r > 0.1
+        masked = np.where(mask, pd["drift_map"], np.nan)
+        im = ax.imshow(masked, cmap="turbo", vmin=0,
+                       vmax=max(np.nanpercentile(masked, 95), 5.0))
+        ax.set_title(f"drift map\n(masked, cert>0.1)", fontsize=6)
+        ax.axis("off")
 
     # Row 4: H_pair bar chart
     ax = fig.add_subplot(gs[3, :])
