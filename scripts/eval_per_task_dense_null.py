@@ -48,7 +48,7 @@ EVAL_TASKS = [
     "6_Use the right hand to pick up orange from middle of table to bottom white shelf.",
 ]
 
-NULL_LAGS = [1, 2, 5, 10]
+NULL_LAGS = [1, 2, 3, 4, 5, 6, 8, 10, 15]   # 9 lags → ~410 null pairs per task
 N_TEST_FRAMES = 10
 
 
