@@ -109,24 +109,48 @@ def fg_mask_from_seg(bgr: np.ndarray) -> np.ndarray:
     return ~np.all(bgr == np.array([127, 127, 127])[None, None, :], axis=-1)
 
 
-def warp_to_flow_rgb(warp_norm: np.ndarray) -> np.ndarray:
-    """Convert (H,W,2) normalized warp to a colorful RGB flow visualization."""
+def warp_to_flow_rgb(warp_norm: np.ndarray,
+                     fg_mask: np.ndarray | None = None) -> np.ndarray:
+    """Convert (H,W,2) normalized warp to a colorful RGB flow visualization.
+
+    Hue = direction, value = magnitude. Background pixels (per `fg_mask`)
+    are rendered black so spurious bg flow doesn't dominate the viz.
+    """
     H, W = warp_norm.shape[:2]
-    # Convert normalized [-1,1] to displacement in pixels relative to identity grid
     yy, xx = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
     target_x = (warp_norm[..., 0] + 1) * (W - 1) / 2
     target_y = (warp_norm[..., 1] + 1) * (H - 1) / 2
     dx = target_x - xx
     dy = target_y - yy
     mag = np.sqrt(dx * dx + dy * dy)
-    ang = (np.arctan2(dy, dx) + np.pi) / (2 * np.pi)  # 0..1
+    ang = (np.arctan2(dy, dx) + np.pi) / (2 * np.pi)
     hsv = np.zeros((H, W, 3), dtype=np.uint8)
     hsv[..., 0] = (ang * 180).astype(np.uint8)
     hsv[..., 1] = 255
-    mag_norm = np.clip(mag / max(1.0, np.percentile(mag, 95)), 0, 1)
+    # Normalize magnitude using ONLY foreground pixels (avoid bg outliers driving the scale)
+    if fg_mask is not None and fg_mask.any():
+        ref = max(1.0, float(np.percentile(mag[fg_mask], 95)))
+    else:
+        ref = max(1.0, float(np.percentile(mag, 95)))
+    mag_norm = np.clip(mag / ref, 0, 1)
     hsv[..., 2] = (mag_norm * 255).astype(np.uint8)
     rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    if fg_mask is not None:
+        rgb[~fg_mask] = 0  # black bg
     return rgb
+
+
+def _fg_mask_from_resized(bgr: np.ndarray, size: int) -> np.ndarray:
+    """SAM3 segmented BGR resized to (size,size) → bool mask (size,size)."""
+    bgr_r = cv2.resize(bgr, (size, size), interpolation=cv2.INTER_NEAREST)
+    return ~np.all(bgr_r == np.array([127, 127, 127])[None, None, :], axis=-1)
+
+
+def _mask_heatmap(heat: np.ndarray, fg_mask: np.ndarray) -> np.ndarray:
+    """Zero out heatmap outside fg_mask."""
+    out = heat.copy()
+    out[~fg_mask] = 0
+    return out
 
 
 def heatmap_overlay(bgr: np.ndarray, heat: np.ndarray, alpha: float = 0.55,
@@ -245,13 +269,18 @@ def main():
     img_a_r = cv2.resize(img_a, (matcher.vis_size, matcher.vis_size))
     img_b_r = cv2.resize(img_b, (matcher.vis_size, matcher.vis_size))
 
+    fg_a = _fg_mask_from_resized(img_a, matcher.vis_size)
+    fg_b = _fg_mask_from_resized(img_b, matcher.vis_size)
+    err_demo_masked = _mask_heatmap(err_demo, fg_a)
+    vmax_demo = float(np.percentile(err_demo[fg_a], 99)) + 1e-6 if fg_a.any() else float(err_demo.max()) + 1e-6
+
     fig, axes = plt.subplots(1, 5, figsize=(25, 5))
     axes[0].imshow(cv2.cvtColor(img_a_r, cv2.COLOR_BGR2RGB)); axes[0].set_title("ref A"); axes[0].axis("off")
     axes[1].imshow(cv2.cvtColor(img_b_r, cv2.COLOR_BGR2RGB)); axes[1].set_title(f"ref B (lag={pair_j-pair_i})"); axes[1].axis("off")
-    axes[2].imshow(warp_to_flow_rgb(fwd_demo.warp)); axes[2].set_title("RoMa warp A→B\n(hue=direction, value=magnitude)"); axes[2].axis("off")
-    axes[3].imshow(warp_to_flow_rgb(bwd_demo.warp)); axes[3].set_title("RoMa warp B→A"); axes[3].axis("off")
-    im = axes[4].imshow(err_demo, cmap="turbo", vmin=0, vmax=float(np.percentile(err_demo, 99)) + 1e-6)
-    axes[4].set_title(f"cycle error map (px)\nmean={null_mean_list[0]:.2f}, p99={null_peak_list[0]:.2f}")
+    axes[2].imshow(warp_to_flow_rgb(fwd_demo.warp, fg_mask=fg_a)); axes[2].set_title("RoMa warp A→B\n(hue=direction, value=mag; bg masked)"); axes[2].axis("off")
+    axes[3].imshow(warp_to_flow_rgb(bwd_demo.warp, fg_mask=fg_b)); axes[3].set_title("RoMa warp B→A"); axes[3].axis("off")
+    im = axes[4].imshow(err_demo_masked, cmap="turbo", vmin=0, vmax=vmax_demo)
+    axes[4].set_title(f"cycle error map (px, fg only)\nmean={null_mean_list[0]:.2f}, p99={null_peak_list[0]:.2f}")
     axes[4].axis("off")
     plt.colorbar(im, ax=axes[4], fraction=0.046)
     fig.suptitle(f"Cycle branch — 1 example pair (lag {pair_j-pair_i})", fontsize=14)
@@ -596,15 +625,20 @@ def _render_online_viz(out_dir, online_result, h_train,
     pair = inter["cycle_pairs"][len(inter["cycle_pairs"]) // 2]
     fwd, bwd = pair["fwd"], pair["bwd"]
     err = cycle_error_map(fwd.warp, bwd.warp)
+    fg_a = _fg_mask_from_resized(pair["img_a"], matcher.vis_size)
+    fg_b = _fg_mask_from_resized(pair["img_b"], matcher.vis_size)
+    err_masked = _mask_heatmap(err, fg_a)
+    vmax_q = float(np.percentile(err[fg_a], 99)) + 1e-6 if fg_a.any() else float(err.max()) + 1e-6
+
     fig, axes = plt.subplots(1, 5, figsize=(25, 5))
     axes[0].imshow(cv2.cvtColor(cv2.resize(pair["img_a"], (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB))
     axes[0].set_title(f"query A (frame {pair['t']})"); axes[0].axis("off")
     axes[1].imshow(cv2.cvtColor(cv2.resize(pair["img_b"], (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB))
     axes[1].set_title(f"query B (frame {pair['t']+1})"); axes[1].axis("off")
-    axes[2].imshow(warp_to_flow_rgb(fwd.warp)); axes[2].set_title("RoMa A→B"); axes[2].axis("off")
-    axes[3].imshow(warp_to_flow_rgb(bwd.warp)); axes[3].set_title("RoMa B→A"); axes[3].axis("off")
-    im = axes[4].imshow(err, cmap="turbo", vmin=0, vmax=float(np.percentile(err, 99)) + 1e-6)
-    axes[4].set_title(f"cycle error (px)\nmean={pair['s_mean']:.2f}, peak={pair['s_peak']:.2f}\nH_pair={pair['h_pair']:.3f}")
+    axes[2].imshow(warp_to_flow_rgb(fwd.warp, fg_mask=fg_a)); axes[2].set_title("RoMa A→B (fg only)"); axes[2].axis("off")
+    axes[3].imshow(warp_to_flow_rgb(bwd.warp, fg_mask=fg_b)); axes[3].set_title("RoMa B→A (fg only)"); axes[3].axis("off")
+    im = axes[4].imshow(err_masked, cmap="turbo", vmin=0, vmax=vmax_q)
+    axes[4].set_title(f"cycle error (px, fg only)\nmean={pair['s_mean']:.2f}, peak={pair['s_peak']:.2f}\nH_pair={pair['h_pair']:.3f}")
     axes[4].axis("off"); plt.colorbar(im, ax=axes[4], fraction=0.046)
     fig.suptitle(f"Cycle branch — 1 query pair (consecutive frames {pair['t']}, {pair['t']+1})", fontsize=14)
     fig.tight_layout()
