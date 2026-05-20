@@ -73,8 +73,8 @@ def main():
     print(f"Loaded {len(eval_tasks)} tasks from {EVAL_TASKS_JSON}")
 
     from warp_score.sam_segmenter import VideoFrameSegmenter
-    print("Loading SAM3 …")
-    seg = VideoFrameSegmenter()
+    print("Loading SAM3 (fallback=gray for DROID — no-detect → all-gray, not full frame) …")
+    seg = VideoFrameSegmenter(fallback="gray")
 
     for ts in sorted(eval_tasks.keys(), key=lambda k: int(k)):
         task = eval_tasks[ts]

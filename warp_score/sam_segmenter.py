@@ -1,22 +1,27 @@
 """SAM3-based foreground segmentation for video frames.
 
-Segments robot arm / gripper from each frame using SAM3 text prompts.
-Background pixels are set to (127, 127, 127) — the convention used by
-ForegroundMask in warp_score/mask.py.
+Segments robot arm + task-relevant objects from each frame using SAM3 text
+prompts. Background pixels are set to (127, 127, 127) — the convention used
+by ForegroundMask in warp_score/mask.py.
 
-When no robot is detected in a frame, the original frame is returned
-unchanged (effectively treating the whole frame as foreground, matching
-the existing static-image fallback behavior).
+Construction:
+    - prompts:        Override the full prompt list (default = robot-only).
+    - extra_prompts:  Additive prompts UNIONED with the default robot set
+                      (use for task-aware objects: ["drawer", "cup", ...]).
+    - fallback:       What to return when SAM3 finds no mask:
+        * "keep"  → original frame (legacy GR-1 behaviour; bg leaks as fg)
+        * "gray"  → all-(127,127,127) frame (zero signal — safe default for DROID)
+        * "none"  → return None (caller decides; e.g. drop the frame)
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 import cv2
 import numpy as np
 
 
-_PROMPTS: list[str] = [
+_ROBOT_PROMPTS: list[str] = [
     "robot arm",
     "robotic hand",
     "gripper",
@@ -24,6 +29,8 @@ _PROMPTS: list[str] = [
 ]
 
 BG_COLOR: tuple[int, int, int] = (127, 127, 127)
+
+Fallback = Literal["keep", "gray", "none"]
 
 
 class VideoFrameSegmenter:
@@ -36,15 +43,27 @@ class VideoFrameSegmenter:
         self,
         model_id: str = "facebook/sam3",
         prompts: Optional[list[str]] = None,
+        extra_prompts: Optional[list[str]] = None,
         threshold: float = 0.3,
+        fallback: Fallback = "keep",
     ) -> None:
         self._model_id = model_id
-        self._prompts = prompts if prompts is not None else _PROMPTS
+        base = list(prompts) if prompts is not None else list(_ROBOT_PROMPTS)
+        if extra_prompts:
+            for p in extra_prompts:
+                if p and p not in base:
+                    base.append(p)
+        self._prompts = base
         self._threshold = threshold
+        self._fallback: Fallback = fallback
 
         self._processor = None
         self._model = None
         self._device: Optional[str] = None
+
+    @property
+    def prompts(self) -> list[str]:
+        return list(self._prompts)
 
     # ── Lazy loader ───────────────────────────────────────────────────────────
 
@@ -109,17 +128,15 @@ class VideoFrameSegmenter:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def segment_frame(self, bgr: np.ndarray) -> np.ndarray:
+    def segment_frame(self, bgr: np.ndarray) -> Optional[np.ndarray]:
         """Segment a BGR frame and replace background with (127, 127, 127).
 
-        Args:
-            bgr: HxWx3 uint8 numpy array in BGR colour order (cv2 convention).
-
         Returns:
-            HxWx3 uint8 BGR array with background pixels set to BG_COLOR.
-            If no robot mask is detected, the original frame is returned
-            unchanged so that downstream ForegroundMask treats every pixel as
-            foreground — matching current static-image fallback behaviour.
+            HxWx3 uint8 BGR with bg masked to BG_COLOR. When SAM3 finds nothing
+            the return depends on `self._fallback`:
+              * "keep" → original frame (caution: bg leaks as fg)
+              * "gray" → all-gray frame (no signal, safer for DROID)
+              * "none" → None
         """
         from PIL import Image
 
@@ -130,7 +147,13 @@ class VideoFrameSegmenter:
 
         alpha = self._build_union_mask(pil_image)
         if alpha is None:
-            return bgr
+            if self._fallback == "keep":
+                return bgr
+            if self._fallback == "gray":
+                return np.full_like(bgr, BG_COLOR, dtype=np.uint8)
+            if self._fallback == "none":
+                return None
+            raise ValueError(f"unknown fallback mode: {self._fallback}")
 
         bg = np.full_like(bgr, BG_COLOR, dtype=np.uint8)
         fg_mask = alpha > 0  # (H, W)
