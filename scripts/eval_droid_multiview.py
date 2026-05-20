@@ -173,7 +173,9 @@ def main() -> None:
     print(f"\nLoading models  (use_knn={args.use_knn}) …")
     matcher = RoMaMatcher(setting="turbo", device="cuda", use_precision=True, vis_size=224)
     matcher._load_model()
-    seg = VideoFrameSegmenter()
+    # DROID: fallback="gray" so frames where SAM3 finds nothing become all-gray
+    # (zero signal) instead of leaking the full unsegmented frame as foreground.
+    seg = VideoFrameSegmenter(fallback="gray")
 
     signals = [
         CycleSignal(cert_floor=0.1),
