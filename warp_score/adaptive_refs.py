@@ -48,7 +48,17 @@ class DinoFeatureExtractor:
 
     @staticmethod
     def _preprocess(img_bgr: np.ndarray) -> "torch.Tensor":
+        """Pad-to-square (gray 127) BEFORE resize — matches RoMaMatcher/fg_mask
+        coordinate system, preserves aspect ratio."""
         import torch
+        H, W = img_bgr.shape[:2]
+        if H != W:
+            side = max(H, W)
+            pad_h, pad_w = side - H, side - W
+            top, bottom = pad_h // 2, pad_h - pad_h // 2
+            left, right = pad_w // 2, pad_w - pad_w // 2
+            img_bgr = cv2.copyMakeBorder(img_bgr, top, bottom, left, right,
+                                         cv2.BORDER_CONSTANT, value=(127, 127, 127))
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         img_rgb = cv2.resize(img_rgb, (_DINO_SIZE, _DINO_SIZE), interpolation=cv2.INTER_LINEAR)
         x = img_rgb.astype(np.float32) / 255.0

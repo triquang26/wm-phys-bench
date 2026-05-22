@@ -140,8 +140,33 @@ def warp_to_flow_rgb(warp_norm: np.ndarray,
     return rgb
 
 
+def _pad_to_square_gray(bgr: np.ndarray) -> np.ndarray:
+    """Pad BGR with gray (127) to make square, preserve aspect."""
+    H, W = bgr.shape[:2]
+    if H == W:
+        return bgr
+    side = max(H, W)
+    pad_h, pad_w = side - H, side - W
+    top, bottom = pad_h // 2, pad_h - pad_h // 2
+    left, right = pad_w // 2, pad_w - pad_w // 2
+    return cv2.copyMakeBorder(bgr, top, bottom, left, right,
+                              cv2.BORDER_CONSTANT, value=(127, 127, 127))
+
+
+def _pad_resize_for_display(bgr: np.ndarray, size: int) -> np.ndarray:
+    """Pad-to-square + resize to (size, size). Use for any panel that will
+    have a heatmap overlay computed in matcher coordinate space, so the
+    display image is in the SAME coordinate system as the heatmap."""
+    return cv2.resize(_pad_to_square_gray(bgr), (size, size),
+                      interpolation=cv2.INTER_LINEAR)
+
+
 def _fg_mask_from_resized(bgr: np.ndarray, size: int) -> np.ndarray:
-    """SAM3 segmented BGR resized to (size,size) → bool mask (size,size)."""
+    """SAM3 segmented BGR → pad-to-square-gray → resized → bool mask.
+
+    Matches RoMaMatcher pad-to-square so fg_mask is in the warp's coord space.
+    """
+    bgr = _pad_to_square_gray(bgr)
     bgr_r = cv2.resize(bgr, (size, size), interpolation=cv2.INTER_NEAREST)
     return ~np.all(bgr_r == np.array([127, 127, 127])[None, None, :], axis=-1)
 
@@ -177,6 +202,10 @@ def main():
                     help="Path to query mp4 (default: first v*.mp4 in generated/<task>/)")
     ap.add_argument("--out_dir", default=None,
                     help="Output dir (default: outputs/benchmark_demo/<task_short>/)")
+    ap.add_argument("--ref_dir", type=Path, default=None,
+                    help="Override reference dir (default: paper-physical-gr1/reference/<task>)")
+    ap.add_argument("--real_mp4", type=Path, default=None,
+                    help="Override training mp4 (default: paper-physical-gr1/raw_videos/gr1/<task_short>.mp4)")
     args = ap.parse_args()
 
     task = args.task
@@ -187,8 +216,8 @@ def main():
     (out_dir / "offline").mkdir(exist_ok=True)
     (out_dir / "online").mkdir(exist_ok=True)
 
-    ref_dir = BENCH_GR1 / "reference" / task
-    real_mp4 = BENCH_GR1 / "raw_videos" / "gr1" / f"{task_short}.mp4"
+    ref_dir = args.ref_dir if args.ref_dir else (BENCH_GR1 / "reference" / task)
+    real_mp4 = args.real_mp4 if args.real_mp4 else (BENCH_GR1 / "raw_videos" / "gr1" / f"{task_short}.mp4")
     if args.query is None:
         args.query = sorted((BENCH_GR1 / "generated" / task).glob("v*.mp4"))[0]
     query_mp4 = Path(args.query)
@@ -211,7 +240,8 @@ def main():
             CycleSignal, empirical_p_value, cycle_error_map,
         )
         from warp_score.statistics import MahalanobisStatistics
-        from warp_score.fusion import cauchy_combine, cauchy_combine_video
+        from warp_score.fusion import (cauchy_combine, cauchy_combine_video,
+                                       BaselineNormalizer)
 
         matcher = RoMaMatcher(setting="turbo", device="cuda", use_precision=True, vis_size=224)
         matcher._load_model()
@@ -266,8 +296,8 @@ def main():
     err_demo = cycle_error_map(fwd_demo.warp, bwd_demo.warp)
     img_a = cv2.imread(str(pngs[pair_i]))
     img_b = cv2.imread(str(pngs[pair_j]))
-    img_a_r = cv2.resize(img_a, (matcher.vis_size, matcher.vis_size))
-    img_b_r = cv2.resize(img_b, (matcher.vis_size, matcher.vis_size))
+    img_a_r = _pad_resize_for_display(img_a, matcher.vis_size)
+    img_b_r = _pad_resize_for_display(img_b, matcher.vis_size)
 
     fg_a = _fg_mask_from_resized(img_a, matcher.vis_size)
     fg_b = _fg_mask_from_resized(img_b, matcher.vis_size)
@@ -331,7 +361,7 @@ def main():
           f"in {timer.timings['offline_04_knn_loo_null']:.1f}s, route={null_knn['route']}, CV={null_knn['cv']:.3f}")
 
     # ── O8: 1 LOO query example + Cochran D-map ───────────────────
-    loo_q_idx = 50  # mid pool
+    loo_q_idx = len(pngs) // 2  # mid pool (works for any ref count)
     q_feat = feats[loo_q_idx]
     cand = [j for j in range(len(pngs)) if j != loo_q_idx]
     top_k_idx = knn.selector.select_for_query(q_feat, feats[cand], KNN_K)
@@ -349,11 +379,11 @@ def main():
 
     # Viz: query + top-5 nearest
     fig, axes = plt.subplots(1, 6, figsize=(24, 4.5))
-    axes[0].imshow(cv2.cvtColor(cv2.resize(cv2.imread(str(q_path)), (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB))
+    axes[0].imshow(cv2.cvtColor(_pad_resize_for_display(cv2.imread(str(q_path)), matcher.vis_size), cv2.COLOR_BGR2RGB))
     axes[0].set_title(f"LOO query\n(ref {loo_q_idx})", fontsize=10)
     axes[0].axis("off")
     for i, idx in enumerate(top_k_idx[:5]):
-        axes[i+1].imshow(cv2.cvtColor(cv2.resize(cv2.imread(str(top_k_paths[i])), (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB))
+        axes[i+1].imshow(cv2.cvtColor(_pad_resize_for_display(cv2.imread(str(top_k_paths[i])), matcher.vis_size), cv2.COLOR_BGR2RGB))
         axes[i+1].set_title(f"top-{i+1} nearest\n(ref {cand[idx]})", fontsize=10)
         axes[i+1].axis("off")
     fig.suptitle(f"kNN LOO — 1 query + top-{KNN_K} retrieval (showing top-5)", fontsize=14)
@@ -363,7 +393,7 @@ def main():
 
     # Cochran D-map viz
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    q_bgr = cv2.cvtColor(cv2.resize(cv2.imread(str(q_path)), (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB)
+    q_bgr = cv2.cvtColor(_pad_resize_for_display(cv2.imread(str(q_path)), matcher.vis_size), cv2.COLOR_BGR2RGB)
     axes[0].imshow(q_bgr); axes[0].set_title("Query (LOO)"); axes[0].axis("off")
     im1 = axes[1].imshow(D_map, cmap="turbo", vmin=0, vmax=float(np.percentile(D_map[fg], 99)) + 1e-6)
     axes[1].set_title(f"Cochran D-map\n(higher = refs disagree)"); axes[1].axis("off")
@@ -408,6 +438,13 @@ def main():
           f"H_train: cycle={h_train['cycle_peak']:.3f}, knn={h_train['knn_peak']:.3f}, "
           f"fused={h_train['fused_peak']:.3f}")
 
+    # ── O11: Fit baseline normalizer (bootstrap H_train sigma) ─────────────
+    with timer.step("offline_06_baseline_normalizer_fit"):
+        normalizer = BaselineNormalizer(n_boot=200, pct=80).fit(
+            h_train["h_pairs"], h_train["h_frames"])
+    print(f"[O6] BaselineNormalizer fit: σ={normalizer.sigma:.4f}, α={normalizer.alpha:.2f} "
+          f"(n_boot=200, p80)")
+
     # ════════════════════════════════════════════════════════════════════
     # ONLINE — score 1 query video
     # ════════════════════════════════════════════════════════════════════
@@ -425,9 +462,10 @@ def main():
     ratio_cycle = online_result["cycle_peak"] / max(h_train["cycle_peak"], 1e-8)
     ratio_knn = online_result["knn_peak"] / max(h_train["knn_peak"], 1e-8)
     ratio_fused = online_result["fused_peak"] / max(h_train["fused_peak"], 1e-8)
+    score_norm = normalizer.normalize(ratio_fused)
 
     print(f"[Q]  H_cycle={online_result['cycle_peak']:.3f}  H_knn={online_result['knn_peak']:.3f}  H_fused={online_result['fused_peak']:.3f}")
-    print(f"[Q]  ratio_cycle={ratio_cycle:.3f}  ratio_knn={ratio_knn:.3f}  ratio_fused={ratio_fused:.3f}")
+    print(f"[Q]  ratio_cycle={ratio_cycle:.3f}  ratio_knn={ratio_knn:.3f}  ratio_fused={ratio_fused:.3f}  score_norm={score_norm:.3f}")
 
     # ── Online viz panels ────────────────────────────────────────
     _render_online_viz(out_dir / "online", online_result, h_train,
@@ -445,8 +483,13 @@ def main():
         "knn_k": KNN_K,
         "knn_route": null_knn["route"],
         "knn_cv": float(null_knn["cv"]),
-        "h_train": {k: float(v) for k, v in h_train.items()
-                    if k != "_intermediates" and not isinstance(v, (list, tuple))},
+        "h_train": {
+            **{k: float(v) for k, v in h_train.items()
+               if k != "_intermediates" and not isinstance(v, (list, tuple))},
+            "h_pairs": [float(v) for v in h_train["h_pairs"]],
+            "h_frames": [float(v) for v in h_train["h_frames"]],
+        },
+        "baseline_normalizer": normalizer.to_dict(),
         "online": {
             "cycle_peak": float(online_result["cycle_peak"]),
             "knn_peak": float(online_result["knn_peak"]),
@@ -454,6 +497,9 @@ def main():
             "ratio_cycle": float(ratio_cycle),
             "ratio_knn": float(ratio_knn),
             "ratio_fused": float(ratio_fused),
+            "score_norm": float(score_norm),
+            "h_pairs": [float(v) for v in online_result["h_pairs"]],
+            "h_frames": [float(v) for v in online_result["h_frames"]],
         },
         "timings_seconds": {k: float(v) for k, v in timer.timings.items()},
     }
@@ -482,6 +528,10 @@ def main():
         r = ho / max(ht, 1e-8)
         v = "🔴 HALLU" if r > 1.0 else ("⚠ borderline" if r > 0.95 else "✓ clean")
         md.append(f"| {sig} | {ht:.4f} | {ho:.4f} | **{r:.3f}** | {v} |")
+    md.append(f"\n## Normalized fused score (sigmoid, bootstrap baseline σ={normalizer.sigma:.4f}, α={normalizer.alpha:.2f})\n")
+    md.append(f"- `score_norm = sigmoid(α · (ratio_fused − 1)) = ` **{score_norm:.3f}**")
+    md.append(f"  - 0.5 = at baseline (ratio = 1.0)")
+    md.append(f"  - >0.5 = more anomalous than baseline; <0.5 = cleaner")
     (out_dir / "timing_summary.md").write_text("\n".join(md))
 
     print(f"\n{'='*70}\nDone\n{'='*70}")
@@ -631,9 +681,9 @@ def _render_online_viz(out_dir, online_result, h_train,
     vmax_q = float(np.percentile(err[fg_a], 99)) + 1e-6 if fg_a.any() else float(err.max()) + 1e-6
 
     fig, axes = plt.subplots(1, 5, figsize=(25, 5))
-    axes[0].imshow(cv2.cvtColor(cv2.resize(pair["img_a"], (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB))
+    axes[0].imshow(cv2.cvtColor(_pad_resize_for_display(pair["img_a"], matcher.vis_size), cv2.COLOR_BGR2RGB))
     axes[0].set_title(f"query A (frame {pair['t']})"); axes[0].axis("off")
-    axes[1].imshow(cv2.cvtColor(cv2.resize(pair["img_b"], (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB))
+    axes[1].imshow(cv2.cvtColor(_pad_resize_for_display(pair["img_b"], matcher.vis_size), cv2.COLOR_BGR2RGB))
     axes[1].set_title(f"query B (frame {pair['t']+1})"); axes[1].axis("off")
     axes[2].imshow(warp_to_flow_rgb(fwd.warp, fg_mask=fg_a)); axes[2].set_title("RoMa A→B (fg only)"); axes[2].axis("off")
     axes[3].imshow(warp_to_flow_rgb(bwd.warp, fg_mask=fg_b)); axes[3].set_title("RoMa B→A (fg only)"); axes[3].axis("off")
@@ -671,7 +721,7 @@ def _render_online_viz(out_dir, online_result, h_train,
         axes[r, 0].set_title(f"query q[{idx}]\nH={info['h_frame']:.3f}, route={info['route']}", fontsize=10)
         axes[r, 0].axis("off")
         for k, ref_path in enumerate(info["top_k_paths"][:5]):
-            axes[r, k+1].imshow(cv2.cvtColor(cv2.resize(cv2.imread(str(ref_path)), (matcher.vis_size, matcher.vis_size)), cv2.COLOR_BGR2RGB))
+            axes[r, k+1].imshow(cv2.cvtColor(_pad_resize_for_display(cv2.imread(str(ref_path)), matcher.vis_size), cv2.COLOR_BGR2RGB))
             axes[r, k+1].set_title(f"top-{k+1}", fontsize=9)
             axes[r, k+1].axis("off")
     fig.suptitle(f"kNN branch — top-5 of k={KNN_K} retrieved refs for 3 query frames", fontsize=14)
@@ -682,7 +732,7 @@ def _render_online_viz(out_dir, online_result, h_train,
     # 05 — D-map per query frame
     fig, axes = plt.subplots(2, 5, figsize=(22, 8))
     for ax, info in zip(axes.flat, inter["knn_frames"]):
-        q = cv2.resize(info["img"], (matcher.vis_size, matcher.vis_size))
+        q = _pad_resize_for_display(info["img"], matcher.vis_size)
         overlay = heatmap_overlay(q, info["D_map"], alpha=0.55)
         ax.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
         ax.set_title(f"q[{info['i']}]  ivar={info['ivar']:.2f}  peak_z={info['peak']:.2f}\nH={info['h_frame']:.3f}", fontsize=9)

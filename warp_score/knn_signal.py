@@ -42,10 +42,28 @@ def fg_mask_from_seg(bgr: np.ndarray) -> np.ndarray:
     return ~np.all(bgr == BG_GRAY[None, None, :], axis=-1)
 
 
+def pad_to_square_gray(bgr: np.ndarray) -> np.ndarray:
+    """Pad BGR image with gray (127,127,127) to make square, preserving aspect.
+
+    Matches RoMaMatcher._load_tensor padding so fg_mask is in the same
+    coordinate system as the matched warp grid.
+    """
+    H, W = bgr.shape[:2]
+    if H == W:
+        return bgr
+    side = max(H, W)
+    pad_h, pad_w = side - H, side - W
+    top, bottom = pad_h // 2, pad_h - pad_h // 2
+    left, right = pad_w // 2, pad_w - pad_w // 2
+    return cv2.copyMakeBorder(bgr, top, bottom, left, right,
+                              cv2.BORDER_CONSTANT, value=(127, 127, 127))
+
+
 def fg_mask_at_size(png_path: Path, size: int) -> np.ndarray:
     bgr = cv2.imread(str(png_path))
     if bgr is None:
         raise FileNotFoundError(png_path)
+    bgr = pad_to_square_gray(bgr)
     bgr_r = cv2.resize(bgr, (size, size), interpolation=cv2.INTER_NEAREST)
     return fg_mask_from_seg(bgr_r)
 

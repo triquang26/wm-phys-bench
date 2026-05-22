@@ -168,6 +168,10 @@ artifacts/v9_dreamgen/heatmaps/
 # Test benchmark data — large reference images and cached results
 test/
 
+# Generated outputs (timing, benchmark demos, logs)
+outputs/
+viz_complementarity.log
+
 # Keep warp_score configs (already tracked by default but ensure not ignored)
 !warp_score/
 !warp_score/**

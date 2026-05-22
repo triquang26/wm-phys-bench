@@ -87,7 +87,12 @@ class RoMaMatcher:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _load_tensor(self, img_like: "Path | str | np.ndarray", size: tuple[int, int]) -> "torch.Tensor":
-        """Load image → (1, 3, H, W) float32 on model device, resized to size."""
+        """Load image → (1, 3, H, W) float32 on model device.
+
+        Pad-to-square (gray 127) BEFORE resizing — preserves aspect ratio.
+        Padded region is gray (= SAM3 background convention) so foreground
+        mask + cert filters it out automatically.
+        """
         from PIL import Image as PILImage
         if isinstance(img_like, (str, Path)):
             img = PILImage.open(img_like).convert("RGB")
@@ -97,6 +102,15 @@ class RoMaMatcher:
         else:
             t = img_like.float() / 255.0 if img_like.max() > 1.0 else img_like.float()
         t = t.unsqueeze(0).to(self.device)
+        # Pad rectangular → square with gray (127/255), preserving aspect
+        H, W = t.shape[-2], t.shape[-1]
+        if H != W:
+            side = max(H, W)
+            pad_h, pad_w = side - H, side - W
+            top, bottom = pad_h // 2, pad_h - pad_h // 2
+            left, right = pad_w // 2, pad_w - pad_w // 2
+            t = F.pad(t, (left, right, top, bottom),
+                      mode="constant", value=127.0 / 255.0)
         return F.interpolate(t, size=size, mode="bicubic", align_corners=False, antialias=True)
 
     @torch.no_grad()
